@@ -1,189 +1,185 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+import calendar
 import uuid
 
-# הגדרות תצוגה RTL ועיצוב מתקדם
-st.set_page_config(page_title="מערכת ניהול כרטיסים PRO", layout="wide")
+# --- הגדרות עיצוב ו-RTL ---
+st.set_page_config(page_title="Ticket Master Pro", layout="wide")
 st.markdown("""
     <style>
-    .main { text-align: right; direction: rtl; }
-    div[data-testid="stBlock"] { direction: rtl; }
-    .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
+    @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Assistant', sans-serif; text-align: right; direction: rtl; }
+    .stMetric { background: #ffffff; border: 1px solid #e0e0e0; padding: 15px; border-radius: 12px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
+    .calendar-card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #f9f9f9; min-height: 100px; }
+    .game-badge { background: #007bff; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 2px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ניהול מסד נתונים בזיכרון ---
+# --- ניהול מסד הנתונים (מקומי עם הכנה לגוגל שיטס) ---
 if 'db' not in st.session_state:
     st.session_state.db = {
         'fixed_cats': {}, # {id: {name, qty, seats}}
         'games': [],      # [{id, name, date, cats: {name: {qty, seats}}}]
-        'sales': []       # [{id, game_id, customer, email, qty, seats, cat, price, total, game_date, created_at}]
+        'sales': []       # [{sale_id, game_id, customer, email, qty, unit_price, total_price, assigned_seats, cat, game_date}]
     }
 
 db = st.session_state.db
 
-# --- פונקציות עזר ---
-def get_game_sales(game_id):
-    return [s for s in db['sales'] if s['game_id'] == game_id]
+# --- פונקציות לוגיקה ---
+def get_game_stats(game_id):
+    game_sales = [s for s in db['sales'] if s['game_id'] == game_id]
+    stats = {}
+    for s in game_sales:
+        stats[s['cat']] = stats.get(s['cat'], {'sold': 0, 'assigned': 0})
+        stats[s['cat']]['sold'] += s['qty']
+        stats[s['cat']]['assigned'] += len(s['assigned_seats'])
+    return stats
 
-# --- תפריט צד מעוצב ---
-st.sidebar.title("🎫 ניהול מערך כרטיסים")
-menu = st.sidebar.selectbox("עבור אל:", ["📅 יומן משחקים", "⚙️ ניהול קטגוריות קבועות", "📊 דוח מכירות מפורט"])
+# --- תפריט ראשי ---
+st.sidebar.title("🎫 מערכת ניהול כרטיסים")
+menu = st.sidebar.selectbox("תפריט", ["📅 יומן ויזואלי", "🏟️ ניהול משחקים", "⚙️ הגדרות קטגוריות", "📊 דוח מכירות"])
 
-# --- 1. ניהול קטגוריות קבועות (תיקון סעיף 4, 7) ---
-if menu == "⚙️ ניהול קטגוריות קבועות":
-    st.header("⚙️ הגדרת קטגוריות קבועות")
+# --- 1. יומן ויזואלי גדול (תיקון סעיף 2) ---
+if menu == "📅 יומן ויזואלי":
+    st.header("📅 יומן משחקים חודשי")
     
-    with st.expander("➕ הוסף קטגוריה חדשה לרשימה"):
-        with st.form("add_fixed"):
+    today = date.today()
+    col_y, col_m = st.columns(2)
+    curr_year = col_y.selectbox("שנה", range(today.year, today.year+2), index=0)
+    curr_month = col_m.selectbox("חודש", range(1, 13), index=today.month-1)
+    
+    cal = calendar.monthcalendar(curr_year, curr_month)
+    month_name = calendar.month_name[curr_month]
+    
+    # יצירת גריד של ימים
+    days_header = ["ב'", "ג'", "ד'", "ה'", "ו'", "ש'", "א'"]
+    cols = st.columns(7)
+    for i, day in enumerate(days_header):
+        cols[i].markdown(f"**{day}**")
+    
+    for week in cal:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            if day == 0:
+                cols[i].write("")
+            else:
+                d_date = date(curr_year, curr_month, day)
+                day_games = [g for g in db['games'] if g['date'] == d_date]
+                with cols[i]:
+                    st.markdown(f"**{day}**")
+                    for g in day_games:
+                        st.markdown(f"<div class='game-badge'>{g['name']}</div>", unsafe_allow_html=True)
+                    if st.button("+", key=f"add_{day}"):
+                        st.session_state.target_date = d_date
+                        st.info(f"עבור ללשונית 'ניהול משחקים' להוספת משחק ל-{d_date}")
+
+# --- 2. הגדרות קטגוריות (תיקון סעיף 3) ---
+elif menu == "⚙️ הגדרות קטגוריות":
+    st.header("⚙️ ניהול קטגוריות קבועות")
+    with st.expander("➕ הוסף קטגוריה חדשה"):
+        with st.form("new_cat"):
             name = st.text_input("שם הקטגוריה")
-            qty = st.number_input("כמות כרטיסים ברירת מחדל", min_value=1)
-            seats = st.text_area("רשימת מקומות (מופרדים בפסיק)")
-            if st.form_submit_button("שמור במערכת"):
-                cat_id = str(uuid.uuid4())[:8]
-                seat_list = [s.strip() for s in seats.split(",")] if seats else [str(i) for i in range(1, qty+1)]
-                db['fixed_cats'][cat_id] = {"name": name, "qty": len(seat_list), "seats": seat_list}
-                st.success("הקטגוריה נוספה!")
+            qty = st.number_input("כמות כרטיסים", min_value=1)
+            seats = st.text_area("שמות מקומות (אופציונלי, הפרד בפסיק)")
+            if st.form_submit_button("שמור"):
+                cid = str(uuid.uuid4())[:8]
+                s_list = [s.strip() for s in seats.split(",")] if seats else []
+                db['fixed_cats'][cid] = {"name": name, "qty": qty, "seats": s_list}
+                st.success("נשמר!")
 
-    if db['fixed_cats']:
-        st.subheader("רשימת קטגוריות קיימות (ניתן לערוך)")
-        for cid, data in list(db['fixed_cats'].items()):
-            with st.expander(f"🛠️ {data['name']} ({data['qty']} מקומות)"):
-                new_name = st.text_input("ערוך שם", data['name'], key=f"edit_n_{cid}")
-                new_seats = st.text_area("ערוך מקומות", ",".join(data['seats']), key=f"edit_s_{cid}")
-                col1, col2 = st.columns(2)
-                if col1.button("עדכן שינויים", key=f"upd_{cid}"):
-                    db['fixed_cats'][cid] = {"name": new_name, "qty": len([s.strip() for s in new_seats.split(",")]), "seats": [s.strip() for s in new_seats.split(",")]}
-                    st.rerun()
-                if col2.button("מחק קטגוריה", key=f"del_{cid}"):
-                    del db['fixed_cats'][cid]
-                    st.rerun()
-
-# --- 2. יומן משחקים (תיקון סעיף 1, 2, 3, 5) ---
-elif menu == "📅 יומן משחקים":
-    st.header("📅 יומן ומעקב משחקים")
-    
-    col_cal, col_info = st.columns([1, 3])
-    
-    with col_cal:
-        selected_date = st.date_input("בחר תאריך לצפייה/הוספה")
-        if st.button("➕ הוסף משחק לתאריך זה"):
-            st.session_state.show_add_game = True
-
-    # הוספת משחק (סעיף 2 - קבועות וחדשות)
-    if st.session_state.get('show_add_game'):
-        with st.form("new_game_form"):
-            g_name = st.text_input("שם המשחק")
-            st.write("בחר קטגוריות למשחק זה:")
-            
-            # בחירת קטגוריות קבועות
-            selected_fixed = st.multiselect("קטגוריות קבועות להוספה", 
-                                            options=list(db['fixed_cats'].keys()),
-                                            format_func=lambda x: db['fixed_cats'][x]['name'])
-            
-            st.info("רוצה להוסיף קטגוריה חד פעמית? מלא כאן:")
-            extra_cat_name = st.text_input("שם קטגוריה חדשה")
-            extra_cat_seats = st.text_area("מקומות (מופרדים בפסיק)")
-            save_to_fixed = st.checkbox("שמור גם כקטגוריה קבועה לעתיד")
-
-            if st.form_submit_button("צור משחק"):
-                game_cats = {}
-                # הוספת קבועות
-                for cid in selected_fixed:
-                    f_cat = db['fixed_cats'][cid]
-                    game_cats[f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
-                
-                # הוספת חד פעמית
-                if extra_cat_name:
-                    s_list = [s.strip() for s in extra_cat_seats.split(",")]
-                    game_cats[extra_cat_name] = {"qty": len(s_list), "seats": s_list}
-                    if save_to_fixed:
-                        db['fixed_cats'][str(uuid.uuid4())[:8]] = {"name": extra_cat_name, "qty": len(s_list), "seats": s_list}
-                
-                db['games'].append({"id": str(uuid.uuid4())[:8], "name": g_name, "date": selected_date, "cats": game_cats})
-                st.session_state.show_add_game = False
+    for cid, data in list(db['fixed_cats'].items()):
+        with st.expander(f"🛠️ {data['name']}"):
+            # תיקון סעיף 3 - שינוי כמות
+            u_name = st.text_input("שם", data['name'], key=f"n_{cid}")
+            u_qty = st.number_input("כמות כרטיסים", value=data['qty'], key=f"q_{cid}")
+            u_seats = st.text_area("מקומות", ",".join(data['seats']), key=f"s_{cid}")
+            if st.button("עדכן", key=f"upd_{cid}"):
+                db['fixed_cats'][cid] = {"name": u_name, "qty": u_qty, "seats": [s.strip() for s in u_seats.split(",")] if u_seats else []}
                 st.rerun()
 
-    # הצגת משחקים לתאריך הנבחר
-    day_games = [g for g in db['games'] if g['date'] == selected_date]
+# --- 3. ניהול משחקים ומכירות (תיקון סעיף 4, 6) ---
+elif menu == "🏟️ ניהול משחקים":
+    st.header("🏟️ ניהול ומכירת כרטיסים")
     
-    if not day_games:
-        st.info("אין משחקים רשומים לתאריך זה.")
-    else:
-        for game in day_games:
-            with st.container():
-                st.markdown(f"### 🏟️ {game['name']}")
-                
-                # תצוגת דאשבורד משחק (סעיף 5)
-                cols = st.columns(len(game['cats']) if game['cats'] else 1)
-                for idx, (c_name, c_data) in enumerate(game['cats'].items()):
-                    sold_count = len([s for s in get_game_sales(game['id']) if s['cat'] == c_name])
-                    with cols[idx]:
-                        st.metric(c_name, f"{sold_count}/{c_data['qty']} נמכרו")
-                
-                t1, t2, t3 = st.tabs(["🛒 ביצוע מכירה", "🪑 מפת מקומות וסטטוס", "✏️ עריכת קטגוריות למשחק"])
-                
-                with t1: # (סעיף 6 - כמות ומקומות)
-                    with st.form(f"sale_{game['id']}"):
-                        cat_sel = st.selectbox("בחר קטגוריה", list(game['cats'].keys()))
-                        c_name = st.text_input("שם לקוח")
-                        c_qty = st.number_input("כמות כרטיסים", min_value=1, step=1)
-                        
-                        # סינון מקומות פנויים
-                        occupied = [s['seat'] for s in get_game_sales(game['id']) if s['cat'] == cat_sel]
-                        available = [s for s in game['cats'][cat_sel]['seats'] if s not in occupied]
-                        
-                        sel_seats = st.multiselect(f"בחר {c_qty} מקומות", available)
-                        
-                        col_p1, col_p2 = st.columns(2)
-                        u_price = col_p1.number_input("מחיר לכרטיס", min_value=0)
-                        u_cost = col_p2.number_input("עלות לכרטיס (שלך)", min_value=0)
-                        
-                        if st.form_submit_button("אשר מכירה"):
-                            if len(sel_seats) != c_qty:
-                                st.error(f"עליך לבחור בדיוק {c_qty} מקומות!")
-                            else:
-                                for s_code in sel_seats:
-                                    db['sales'].append({
-                                        "game_id": game['id'], "customer": c_name, "cat": cat_sel,
-                                        "qty": 1, "seat": s_code, "price": u_price, "cost": u_cost,
-                                        "total": u_price, "game_name": game['name'], "game_date": game['date'],
-                                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-                                    })
-                                st.success("המכירה בוצעה!")
-                                st.rerun()
+    # הוספת משחק
+    with st.expander("➕ צור משחק חדש"):
+        g_name = st.text_input("שם המשחק")
+        g_date = st.date_input("תאריך", value=st.session_state.get('target_date', date.today()))
+        selected_fixed = st.multiselect("בחר קטגוריות קבועות", options=list(db['fixed_cats'].keys()), format_func=lambda x: db['fixed_cats'][x]['name'])
+        if st.button("צור משחק"):
+            cats = {}
+            for cid in selected_fixed:
+                f = db['fixed_cats'][cid]
+                cats[f['name']] = {"qty": f['qty'], "seats": list(f['seats'])}
+            db['games'].append({"id": str(uuid.uuid4())[:8], "name": g_name, "date": g_date, "cats": cats})
+            st.success("משחק נוצר!")
 
-                with t2: # סטטוס מקומות מלא (סעיף 5)
-                    cat_view = st.selectbox("ראה מקומות עבור:", list(game['cats'].keys()), key=f"view_{game['id']}")
-                    seat_map = []
-                    for s in game['cats'][cat_view]['seats']:
-                        owner = next((sl['customer'] for sl in get_game_sales(game['id']) if sl['cat'] == cat_view and sl['seat'] == s), "✅ פנוי")
-                        seat_map.append({"מקום": s, "סטטוס/שם לקוח": owner})
-                    st.table(pd.DataFrame(seat_map))
+    for g in db['games']:
+        with st.expander(f"⚽ {g['name']} | {g['date']}"):
+            stats = get_game_stats(g['id'])
+            
+            # תצוגת סטטיסטיקה (סעיף 6)
+            st.subheader("מצב מלאי")
+            cols = st.columns(len(g['cats']) if g['cats'] else 1)
+            for i, (c_name, c_data) in enumerate(g['cats'].items()):
+                c_stat = stats.get(c_name, {'sold': 0, 'assigned': 0})
+                with cols[i]:
+                    st.markdown(f"""
+                    <div class='stMetric'>
+                        <b>{c_name}</b><br>
+                        <span style='font-size: 20px;'>נמכרו: {c_stat['sold']} / {c_data['qty']}</span><br>
+                        <small>מקומות שחולקו: {c_stat['assigned']}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                with t3: # עריכת קטגוריות למשחק ספציפי (סעיף 3)
-                    st.warning("שינויים כאן ישפיעו רק על המשחק הזה!")
-                    for c_name, c_data in game['cats'].items():
-                        new_s = st.text_area(f"ערוך מקומות ל-{c_name}", ",".join(c_data['seats']), key=f"loc_edit_{game['id']}_{c_name}")
-                        if st.button(f"עדכן {c_name} למשחק זה"):
-                            game['cats'][c_name]['seats'] = [x.strip() for x in new_s.split(",")]
-                            game['cats'][c_name]['qty'] = len(game['cats'][c_name]['seats'])
-                            st.success("עודכן!")
+            t1, t2 = st.tabs(["🛒 מכירה חדשה", "🪑 ניהול מקומות"])
+            
+            with t1:
+                with st.form(f"sale_{g['id']}"):
+                    cat_sel = st.selectbox("בחר קטגוריה", list(g['cats'].keys()))
+                    c_name = st.text_input("שם לקוח")
+                    c_qty = st.number_input("כמות כרטיסים", min_value=1)
+                    u_price = st.number_input("מחיר לכרטיס")
+                    
+                    # סעיף 4 - מקומות הם אופציונליים
+                    occupied = [seat for s in db['sales'] if s['game_id'] == g['id'] and s['cat'] == cat_sel for seat in s['assigned_seats']]
+                    available = [s for s in g['cats'][cat_sel]['seats'] if s not in occupied]
+                    sel_seats = st.multiselect("הקצה מקומות עכשיו (אופציונלי)", available)
+                    
+                    if st.form_submit_button("בצע מכירה"):
+                        # אזהרת מלאי (סעיף 6)
+                        current_sold = stats.get(cat_sel, {'sold': 0})['sold']
+                        if current_sold + c_qty > g['cats'][cat_sel]['qty']:
+                            st.warning("שים לב: המכירה חורגת מהמלאי המוגדר!")
+                        
+                        db['sales'].append({
+                            "sale_id": str(uuid.uuid4())[:8], "game_id": g['id'], "customer": c_name,
+                            "cat": cat_sel, "qty": c_qty, "unit_price": u_price, "total_price": u_price * c_qty,
+                            "assigned_seats": sel_seats, "game_date": g['date'], "game_name": g['name']
+                        })
+                        st.success("מכירה נרשמה!")
+                        st.rerun()
 
-# --- 3. דוח מכירות (תיקון סעיף 8) ---
-elif menu == "📊 דוח מכירות מפורט":
-    st.header("📊 דוח מכירות וביצועים")
+            with t2:
+                # ניהול והקצאת מקומות למכירות קיימות
+                st.subheader("הקצאת מקומות למכירות")
+                relevant_sales = [s for s in db['sales'] if s['game_id'] == g['id']]
+                for s in relevant_sales:
+                    if len(s['assigned_seats']) < s['qty']:
+                        st.write(f"⚠️ {s['customer']} - חסרים {s['qty'] - len(s['assigned_seats'])} מקומות")
+                        # כאן אפשר להוסיף כפתור להקצאה מהירה
+
+# --- 4. דוח מכירות (תיקון סעיף 5) ---
+elif menu == "📊 דוח מכירות":
+    st.header("📊 דוח מכירות")
     if db['sales']:
+        # סעיף 5 - שורה אחת לכל מכירה, ללא פירוט מקומות (למען הסדר)
         df = pd.DataFrame(db['sales'])
-        # סידור עמודות לפי בקשה
-        cols_order = ['customer', 'cat', 'seat', 'price', 'total', 'game_name', 'game_date', 'created_at']
-        df = df[cols_order]
-        df.columns = ['לקוח', 'קטגוריה', 'מקום', 'מחיר ליחידה', 'סה"כ שולם', 'משחק', 'תאריך משחק', 'תאריך מכירה']
+        display_df = df[['customer', 'game_name', 'game_date', 'cat', 'qty', 'unit_price', 'total_price']].copy()
+        display_df.columns = ['לקוח', 'משחק', 'תאריך משחק', 'קטגוריה', 'כמות', 'מחיר יחידה', 'סה"כ']
         
-        st.dataframe(df.sort_values(by='תאריך מכירה', ascending=False), use_container_width=True)
+        st.dataframe(display_df, use_container_width=True)
         
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 ייצוא לאקסל (CSV)", csv, "sales_report.csv", "text/csv")
-    else:
-        st.info("אין נתוני מכירות להצגה.")
+        csv = display_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 ייצוא לאקסל", csv, "sales.csv", "text/csv")
