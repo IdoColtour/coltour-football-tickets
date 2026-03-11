@@ -2,41 +2,15 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import uuid
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import json
 import os
 from calendar import monthcalendar, month_name
-
-# ============== GOOGLE SHEETS SETUP ==============
-def init_google_sheets():
-    """Initialize Google Sheets connection"""
-    try:
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        
-        # Try to load from secrets or environment
-        if 'GOOGLE_SHEETS_CREDS' in st.secrets:
-            creds_dict = st.secrets['GOOGLE_SHEETS_CREDS']
-        elif os.path.exists('client_secret.json'):
-            with open('client_secret.json') as f:
-                creds_dict = json.load(f)
-        else:
-            st.warning("Google Sheets credentials not found. Running in local-only mode.")
-            return None
-        
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        gc = gspread.authorize(creds)
-        return gc
-    except Exception as e:
-        st.warning(f"Google Sheets connection error: {e}")
-        return None
 
 # ============== PAGE CONFIG & STYLING ==============
 st.set_page_config(
     page_title="🎫 ניהול כרטיסים PRO",
     layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={"About": "Football Tickets Management System v2.0"}
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
@@ -47,21 +21,14 @@ st.markdown("""
                 color: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     .metric-label { font-size: 12px; opacity: 0.9; }
     .metric-value { font-size: 28px; font-weight: bold; margin-top: 5px; }
-    .sold-warning { background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; 
-                    border-radius: 4px; margin: 10px 0; }
-    .seats-info { background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 10px; 
-                  border-radius: 4px; font-size: 12px; margin-top: 5px; }
-    .game-card { background: white; border-radius: 12px; padding: 20px; 
-                 box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 15px 0; }
+    .sold-warning { background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; border-radius: 4px; }
+    .seats-info { background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 10px; border-radius: 4px; font-size: 12px; }
+    .game-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 15px 0; }
     .calendar-header { font-size: 20px; font-weight: bold; text-align: center; padding: 15px; 
-                       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; 
-                       border-radius: 8px; margin-bottom: 15px; }
-    .calendar-day { border: 1px solid #ddd; padding: 10px; height: 100px; 
-                    border-radius: 6px; background: white; overflow-y: auto; }
-    .calendar-event { background-color: #667eea; color: white; padding: 4px 8px; 
-                      border-radius: 4px; font-size: 11px; margin-bottom: 3px; cursor: pointer; }
-    .tab-container { background: white; border-radius: 12px; padding: 20px; 
-                     box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; }
+    .calendar-day { border: 1px solid #ddd; padding: 10px; height: 100px; border-radius: 6px; background: white; overflow-y: auto; }
+    .calendar-event { background-color: #667eea; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-bottom: 3px; }
+    .tab-container { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
     .category-edit-box { background: #f0f2f6; padding: 15px; border-radius: 8px; margin: 10px 0; }
     </style>
     """, unsafe_allow_html=True)
@@ -69,96 +36,30 @@ st.markdown("""
 # ============== SESSION STATE INITIALIZATION ==============
 if 'db' not in st.session_state:
     st.session_state.db = {
-        'fixed_cats': {},  # {id: {name, qty, seats, created_at}}
-        'games': [],       # [{id, name, date, cats: {name: {qty, seats}}}]
-        'sales': []        # [{id, game_id, customer, email, qty, seat, cat, price, cost, total, game_name, game_date, created_at}]
+        'fixed_cats': {},
+        'games': [],
+        'sales': []
     }
-
-if 'google_sheets' not in st.session_state:
-    st.session_state.google_sheets = init_google_sheets()
 
 if 'show_add_game' not in st.session_state:
     st.session_state.show_add_game = False
 
+if 'current_month' not in st.session_state:
+    st.session_state.current_month = datetime.now()
+
 db = st.session_state.db
-gc = st.session_state.google_sheets
-
-# ============== GOOGLE SHEETS SYNC FUNCTIONS ==============
-def sync_to_sheets(sheet_name, data):
-    """Sync data to Google Sheets"""
-    if gc is None:
-        return False
-    try:
-        sh = gc.open("ColtourTickets")
-        ws = sh.worksheet(sheet_name)
-        ws.clear()
-        if data:
-            ws.append_rows(data)
-        return True
-    except Exception as e:
-        st.warning(f"Sync error: {e}")
-        return False
-
-def load_from_sheets(sheet_name):
-    """Load data from Google Sheets"""
-    if gc is None:
-        return None
-    try:
-        sh = gc.open("ColtourTickets")
-        ws = sh.worksheet(sheet_name)
-        return ws.get_all_values()
-    except Exception as e:
-        st.warning(f"Load error: {e}")
-        return None
-
-def save_all_to_sheets():
-    """Save all data to Google Sheets"""
-    if gc is None:
-        return
-    
-    # Convert fixed_cats to rows
-    fixed_cats_rows = [['ID', 'Name', 'Qty', 'Seats', 'Created']]
-    for cid, data in db['fixed_cats'].items():
-        fixed_cats_rows.append([cid, data['name'], data['qty'], ','.join(data['seats']), data.get('created_at', '')])
-    sync_to_sheets('FixedCategories', fixed_cats_rows)
-    
-    # Convert games to rows
-    games_rows = [['ID', 'Name', 'Date', 'Categories']]
-    for game in db['games']:
-        games_rows.append([game['id'], game['name'], str(game['date']), json.dumps(game['cats'])])
-    sync_to_sheets('Games', games_rows)
-    
-    # Convert sales to rows
-    sales_rows = [['ID', 'GameID', 'Customer', 'Category', 'Seat', 'Price', 'Cost', 'Total', 'GameName', 'GameDate', 'CreatedAt']]
-    for sale in db['sales']:
-        sales_rows.append([
-            sale.get('id', ''),
-            sale['game_id'],
-            sale['customer'],
-            sale['cat'],
-            sale.get('seat', ''),
-            sale['price'],
-            sale.get('cost', 0),
-            sale['total'],
-            sale['game_name'],
-            str(sale['game_date']),
-            sale['created_at']
-        ])
-    sync_to_sheets('Sales', sales_rows)
 
 # ============== HELPER FUNCTIONS ==============
 def get_game_sales(game_id):
     return [s for s in db['sales'] if s['game_id'] == game_id]
 
 def get_category_stats(game_id, category_name):
-    """Get sales and seat assignment stats for a category"""
     sales = [s for s in get_game_sales(game_id) if s['cat'] == category_name]
     sold_qty = len(sales)
     assigned_seats = len([s for s in sales if s.get('seat')])
     return {'sold': sold_qty, 'assigned': assigned_seats}
 
 def get_available_seats(game_id, category_name):
-    """Get list of unassigned seats for a category"""
     game = next((g for g in db['games'] if g['id'] == game_id), None)
     if not game or category_name not in game['cats']:
         return []
@@ -173,22 +74,17 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "בחר דף:",
-    ["📅 לוח שנה חדש", "🎮 יומן משחקים", "⚙️ קטגוריות קבועות", "📊 דוח מכירות", "💾 ייצוא/ייבוא"]
+    ["📅 לוח שנה", "🎮 יומן משחקים", "⚙️ קטגוריות קבועות", "📊 דוח מכירות"]
 )
 
 st.sidebar.markdown("---")
-if st.sidebar.button("💾 שמור הכל ל-Google Sheets"):
-    save_all_to_sheets()
-    st.sidebar.success("✅ נשמר בהצלחה!")
+st.sidebar.info("📱 כל הנתונים שלך שמורים בטוח באפליקציה")
 
 # ============== PAGE 1: CALENDAR VIEW ==============
-if menu == "📅 לוח שנה חדש":
+if menu == "📅 לוח שנה":
     st.header("📅 לוח שנה ניהול משחקים")
     
     col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-    
-    if 'current_month' not in st.session_state:
-        st.session_state.current_month = datetime.now()
     
     current_month = st.session_state.current_month
     
@@ -209,14 +105,12 @@ if menu == "📅 לוח שנה חדש":
     # Display calendar grid
     cal = monthcalendar(current_month.year, current_month.month)
     
-    # Days of week header
     days_header = st.columns(7)
     day_names = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
     for idx, day_name in enumerate(day_names):
         with days_header[idx]:
             st.markdown(f"<h4 style='text-align:center; color:#667eea;'>{day_name}</h4>", unsafe_allow_html=True)
     
-    # Calendar days
     for week in cal:
         week_cols = st.columns(7)
         for day_idx, day in enumerate(week):
@@ -295,12 +189,10 @@ elif menu == "🎮 יומן משחקים":
             if st.form_submit_button("✅ צור משחק"):
                 game_cats = {}
                 
-                # Add fixed categories
                 for cid in selected_fixed:
                     f_cat = db['fixed_cats'][cid]
                     game_cats[f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
                 
-                # Add one-time category
                 if extra_cat_name:
                     s_list = [s.strip() for s in extra_cat_seats.split(",") if s.strip()] if extra_cat_seats else [str(i) for i in range(1, extra_cat_qty+1)]
                     game_cats[extra_cat_name] = {"qty": len(s_list), "seats": s_list}
@@ -321,7 +213,6 @@ elif menu == "🎮 יומן משחקים":
                 })
                 
                 st.session_state.show_add_game = False
-                save_all_to_sheets()
                 st.rerun()
     
     # Display games for selected date
@@ -376,7 +267,6 @@ elif menu == "🎮 יומן משחקים":
                         with col_cost:
                             u_cost = st.number_input("עלות ליחידה", min_value=0, key=f"cost_{game['id']}")
                         
-                        # Seat assignment options
                         st.write("**הקצאת מקומות:**")
                         assign_now = st.checkbox("הקצה מקומות עכשיו", value=False)
                         
@@ -386,7 +276,6 @@ elif menu == "🎮 יומן משחקים":
                             sel_seats = st.multiselect(f"בחר {c_qty} מקומות (יש {len(available)} פנויים)", available, key=f"seats_{game['id']}")
                         
                         if st.form_submit_button("✅ אשר מכירה"):
-                            # Check if qty exceeds inventory
                             stats = get_category_stats(game['id'], cat_sel)
                             available_inv = game['cats'][cat_sel]['qty']
                             
@@ -396,7 +285,6 @@ elif menu == "🎮 יומן משחקים":
                             if assign_now and len(sel_seats) != c_qty:
                                 st.error(f"❌ עליך לבחור בדיוק {c_qty} מקומות!")
                             else:
-                                # Create sale entry or multiple if seats are selected
                                 if assign_now and sel_seats:
                                     for seat in sel_seats:
                                         db['sales'].append({
@@ -415,7 +303,6 @@ elif menu == "🎮 יומן משחקים":
                                             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                                         })
                                 else:
-                                    # Create sale without seat assignment
                                     db['sales'].append({
                                         "id": str(uuid.uuid4())[:8],
                                         "game_id": game['id'],
@@ -432,7 +319,6 @@ elif menu == "🎮 יומן משחקים":
                                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                                     })
                                 
-                                save_all_to_sheets()
                                 st.success("✅ המכירה בוצעה!")
                                 st.rerun()
                 
@@ -465,7 +351,6 @@ elif menu == "🎮 יומן משחקים":
                             seats_list = [x.strip() for x in new_s.split(",") if x.strip()]
                             game['cats'][c_name]['seats'] = seats_list
                             game['cats'][c_name]['qty'] = new_qty
-                            save_all_to_sheets()
                             st.success("✅ עודכן!")
                             st.rerun()
                         
@@ -474,11 +359,10 @@ elif menu == "🎮 יומן משחקים":
                 with tab4:
                     st.write("**הקצה מקומות לכרטיסים ללא הקצאה**")
                     
-                    # Find unassigned sales
                     unassigned_sales = [s for s in get_game_sales(game['id']) if not s.get('seat') or s['seat'] == '']
                     
                     if not unassigned_sales:
-                        st.info("✅ כל הכרטיסים הוקצו!")
+                        st.info("✅ כל הכ��טיסים הוקצו!")
                     else:
                         for idx, sale in enumerate(unassigned_sales):
                             st.markdown(f"**{idx+1}. {sale['customer']} - {sale['cat']} ({sale['qty']} כרטיסים)**")
@@ -495,7 +379,6 @@ elif menu == "🎮 יומן משחקים":
                                 if len(selected) != sale['qty']:
                                     st.error(f"בחר בדיוק {sale['qty']} מקומות!")
                                 else:
-                                    # Remove old sale and create new ones with seats
                                     db['sales'] = [s for s in db['sales'] if s['id'] != sale['id']]
                                     for seat in selected:
                                         db['sales'].append({
@@ -513,7 +396,6 @@ elif menu == "🎮 יומן משחקים":
                                             "game_date": sale['game_date'],
                                             "created_at": sale['created_at']
                                         })
-                                    save_all_to_sheets()
                                     st.success("✅ הוקצו!")
                                     st.rerun()
                 
@@ -541,7 +423,6 @@ elif menu == "⚙️ קטגוריות קבועות":
                         "seats": seat_list,
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                     }
-                    save_all_to_sheets()
                     st.success("✅ הקטגוריה נוספה!")
                     st.rerun()
     
@@ -557,7 +438,7 @@ elif menu == "⚙️ קטגוריות קבועות":
                 st.markdown(f"<div class='category-edit-box'>", unsafe_allow_html=True)
                 
                 new_name = st.text_input("שם הקטגוריה", data['name'], key=f"edit_n_{cid}")
-                new_qty = st.number_input("כמות כרטיסים", value=data['qty'], min_value=1, key=f"edit_qty_{cid}")
+                new_qty = st.number_input(f"כמות כרטיסים", value=data['qty'], min_value=1, key=f"edit_qty_{cid}")
                 new_seats = st.text_area("מקומות (מופרדים בפסיק)", ",".join(data['seats']), key=f"edit_s_{cid}")
                 
                 col_upd, col_del = st.columns(2)
@@ -571,14 +452,12 @@ elif menu == "⚙️ קטגוריות קבועות":
                             "seats": seats_list if seats_list else [str(i) for i in range(1, new_qty+1)],
                             "created_at": data.get('created_at', '')
                         }
-                        save_all_to_sheets()
                         st.success("✅ עודכנה!")
                         st.rerun()
                 
                 with col_del:
                     if st.button("🗑️ מחק קטגוריה", key=f"del_{cid}"):
                         del db['fixed_cats'][cid]
-                        save_all_to_sheets()
                         st.success("✅ הוסרה!")
                         st.rerun()
                 
@@ -589,7 +468,7 @@ elif menu == "📊 דוח מכירות":
     st.header("📊 דוח מכירות וביצועים")
     
     if db['sales']:
-        # Aggregate sales (group by customer, game, category)
+        # Aggregate sales
         aggregated = {}
         for sale in db['sales']:
             key = (sale['customer'], sale['cat'], sale['game_name'], sale['game_date'])
@@ -610,7 +489,6 @@ elif menu == "📊 דוח מכירות":
             aggregated[key]['total'] += sale['total']
             aggregated[key]['cost'] += sale.get('cost', 0) * sale['qty']
         
-        # Convert to dataframe
         report_data = list(aggregated.values())
         for row in report_data:
             row['profit'] = row['total'] - row['cost']
@@ -643,7 +521,6 @@ elif menu == "📊 דוח מכירות":
         with col_filter3:
             sort_by = st.selectbox("מיין לפי", ['תאריך מכירה', 'סה"כ שולם', 'כמות'])
         
-        # Apply filters
         df_filtered = df[
             (df['משחק'].isin(selected_game)) &
             (df['קטגוריה'].isin(selected_cat))
@@ -653,7 +530,7 @@ elif menu == "📊 דוח מכירות":
         
         st.markdown("---")
         
-        # Download options
+        # Download
         col_csv, col_json = st.columns(2)
         
         with col_csv:
@@ -665,58 +542,3 @@ elif menu == "📊 דוח מכירות":
             st.download_button("📥 ייצוא ל-JSON", json_str, "sales_report.json", "application/json")
     else:
         st.info("📭 אין נתוני מכירות להצגה עדיין.")
-
-# ============== PAGE 5: IMPORT/EXPORT ==============
-elif menu == "💾 ייצוא/ייבוא":
-    st.header("💾 ייצוא וייבוא נתונים")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 ייצוא נתונים")
-        
-        export_format = st.radio("בחר פורמט", ["JSON", "CSV"])
-        
-        if st.button("ייצא נתונים"):
-            if export_format == "JSON":
-                export_data = {
-                    'fixed_cats': db['fixed_cats'],
-                    'games': db['games'],
-                    'sales': db['sales']
-                }
-                json_str = json.dumps(export_data, ensure_ascii=False, indent=2, default=str).encode('utf-8')
-                st.download_button("📥 הורד JSON", json_str, "coltour_backup.json", "application/json")
-            else:
-                # Sales to CSV
-                if db['sales']:
-                    df = pd.DataFrame(db['sales'])
-                    csv = df.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button("📥 הורד CSV", csv, "coltour_sales.csv", "text/csv")
-                else:
-                    st.warning("אין מכירות לייצא")
-    
-    with col2:
-        st.subheader("📥 ייבוא נתונים")
-        
-        uploaded_file = st.file_uploader("בחר קובץ לייבוא", type=['json', 'csv'])
-        
-        if uploaded_file and st.button("ייבא נתונים"):
-            try:
-                if uploaded_file.name.endswith('.json'):
-                    import_data = json.load(uploaded_file)
-                    st.session_state.db = import_data
-                    st.success("✅ נתונים יובאו בהצלחה!")
-                else:
-                    st.warning("⚠️ ייבוא CSV פשוט עדיין לא מומש. השתמש ב-JSON.")
-            except Exception as e:
-                st.error(f"❌ שגיאה: {e}")
-    
-    st.markdown("---")
-    st.subheader("🔄 סנכרון Google Sheets")
-    
-    if st.button("💾 שמור הכל ל-Google Sheets"):
-        save_all_to_sheets()
-        st.success("✅ נשמר בהצלחה ל-Google Sheets!")
-    
-    if st.button("📥 טען מ-Google Sheets"):
-        st.info("⏳ פונקציה זו תעמוד לרשות בעדכון הבא")
