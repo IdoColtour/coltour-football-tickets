@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import uuid
 import json
-from calendar import monthcalendar, month_name, weekday, MONDAY
+from calendar import monthcalendar, month_name
 
 # ============== PAGE CONFIG & STYLING ==============
 st.set_page_config(
@@ -66,7 +66,6 @@ st.markdown("""
 if 'db' not in st.session_state:
     st.session_state.db = {
         'fixed_cats': {},
-        'fixed_teams': {},
         'games': [],
         'sales': []
     }
@@ -112,20 +111,13 @@ def get_unassigned_tickets(game_id, category_name):
     sales = [s for s in get_game_sales(game_id) if s['cat'] == category_name and (not s.get('seat') or s['seat'] == '')]
     return sales
 
-def get_calendar_with_monday_start(year, month):
-    """Get calendar with Monday as first day of week"""
-    cal = monthcalendar(year, month)
-    # monthcalendar returns weeks starting with Monday by default
-    return cal
-
 def display_game_details(game_id):
     """Display full game details"""
     game = next((g for g in db['games'] if g['id'] == game_id), None)
     if not game:
         return
     
-    team_name = game.get('team', 'No Team')
-    st.markdown(f"### 🏟️ {game['name']} - {game['date'].strftime('%B %d, %Y')} | Team: {team_name}")
+    st.markdown(f"### 🏟️ {game['name']} - {game['date'].strftime('%B %d, %Y')}")
     
     # Category stats dashboard
     st.write("**📊 Category Status:**")
@@ -273,36 +265,34 @@ def display_game_details(game_id):
                     
                     with col_fixed_sel:
                         st.write("**Select Fixed Category:**")
-                        use_fixed = st.checkbox("Use Fixed Category", key=f"use_fixed_{game['id']}")
-                        if use_fixed:
-                            fixed_cat_options = [c for c in db['fixed_cats'].keys() if db['fixed_cats'][c]['name'] not in game['cats']]
-                            if fixed_cat_options:
-                                selected_fixed = st.selectbox("Choose Fixed Category", fixed_cat_options, 
-                                                             format_func=lambda x: f"{db['fixed_cats'][x]['name']}", 
-                                                             key=f"select_fixed_{game['id']}")
-                            else:
-                                st.info("All fixed categories already in this game")
-                                selected_fixed = None
-                        else:
-                            selected_fixed = None
+                        use_fixed = st.radio("Category Source", ["Use Fixed", "Create New"], key=f"use_fixed_{game['id']}", horizontal=True)
                     
                     with col_new_cat:
-                        st.write("**Or Create New:**")
+                        pass
+                    
+                    if use_fixed == "Use Fixed":
+                        fixed_cat_options = [c for c in db['fixed_cats'].keys() if db['fixed_cats'][c]['name'] not in game['cats']]
+                        if fixed_cat_options:
+                            selected_fixed = st.selectbox("Choose Fixed Category", fixed_cat_options, 
+                                                         format_func=lambda x: f"{db['fixed_cats'][x]['name']}", 
+                                                         key=f"select_fixed_{game['id']}")
+                            if st.form_submit_button("➕ Add Category"):
+                                f_cat = db['fixed_cats'][selected_fixed]
+                                if f_cat['name'] in game['cats']:
+                                    st.error("Category already exists!")
+                                else:
+                                    game['cats'][f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
+                                    st.success("✅ Category Added!")
+                                    st.rerun()
+                        else:
+                            st.info("All fixed categories already in this game")
+                    else:
                         new_cat_name = st.text_input("Category Name", key=f"new_cat_name_{game['id']}")
                         new_cat_qty = st.number_input("Ticket Quantity", min_value=1, key=f"new_cat_qty_{game['id']}")
                         new_cat_seats = st.text_area("Seats (comma-separated) - Leave empty for empty seats", key=f"new_cat_seats_{game['id']}")
                         save_as_fixed = st.checkbox("Save as Fixed Category", key=f"save_as_fixed_{game['id']}")
-                    
-                    if st.form_submit_button("➕ Add Category"):
-                        if use_fixed and selected_fixed:
-                            f_cat = db['fixed_cats'][selected_fixed]
-                            if f_cat['name'] in game['cats']:
-                                st.error("Category already exists!")
-                            else:
-                                game['cats'][f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
-                                st.success("✅ Category Added!")
-                                st.rerun()
-                        elif new_cat_name:
+                        
+                        if st.form_submit_button("➕ Add Category"):
                             if new_cat_name in game['cats']:
                                 st.error("Category already exists!")
                             else:
@@ -316,7 +306,6 @@ def display_game_details(game_id):
                                 if save_as_fixed:
                                     db['fixed_cats'][str(uuid.uuid4())[:8]] = {
                                         "name": new_cat_name,
-                                        "team": game.get('team', ''),
                                         "qty": new_cat_qty,
                                         "seats": seats_list,
                                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -324,8 +313,6 @@ def display_game_details(game_id):
                                 
                                 st.success("✅ Category Added!")
                                 st.rerun()
-                        else:
-                            st.error("Please select or create a category!")
         
         st.markdown("---")
         
@@ -335,16 +322,32 @@ def display_game_details(game_id):
             
             new_qty = st.number_input(f"Ticket Quantity", value=c_data['qty'], key=f"qty_edit_{game['id']}_{c_name}")
             new_name = st.text_input(f"Category Name", value=c_name, key=f"name_edit_{game['id']}_{c_name}")
-            new_s = st.text_area(f"Seats (comma-separated)", ",".join(c_data['seats']), key=f"loc_edit_{game['id']}_{c_name}")
+            new_s = st.text_area(f"Seats (comma-separated)", ",".join([s for s in c_data['seats'] if s]), key=f"loc_edit_{game['id']}_{c_name}")
             
             col_upd, col_del = st.columns(2)
             
             with col_upd:
                 if st.button(f"🔄 Update {c_name}", key=f"update_{game['id']}_{c_name}"):
-                    seats_list = [x.strip() for x in new_s.split(",") if x.strip()] if new_s else ["" for _ in range(new_qty)]
                     if new_name != c_name and new_name in game['cats']:
                         st.error("Category name already exists!")
                     else:
+                        # Keep assigned seats in place, only update empty ones
+                        old_seats = c_data['seats']
+                        occupied_seats = [s for s in old_seats if s and any(sale['seat'] == s for sale in get_game_sales(game['id']) if sale['cat'] == c_name)]
+                        
+                        if new_s:
+                            new_seats_input = [x.strip() for x in new_s.split(",") if x.strip()]
+                        else:
+                            new_seats_input = ["" for _ in range(new_qty)]
+                        
+                        # Preserve occupied seats
+                        seats_list = []
+                        for seat in new_seats_input:
+                            if seat in occupied_seats:
+                                seats_list.append(seat)
+                            else:
+                                seats_list.append(seat)
+                        
                         if new_name != c_name:
                             game['cats'][new_name] = game['cats'].pop(c_name)
                             game['cats'][new_name]['seats'] = seats_list
@@ -451,6 +454,30 @@ def display_game_details(game_id):
             
             df_sales = pd.DataFrame(sales_list)
             st.dataframe(df_sales, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.subheader("Manage Sales")
+            
+            for sale in game_sales:
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.write(f"{sale['customer']} - {sale['cat']} - Seat: {sale.get('seat', 'Not Assigned') if sale.get('seat') else 'Not Assigned'}")
+                
+                with col2:
+                    if sale.get('seat'):
+                        if st.button("✏️ Change Seat", key=f"change_seat_{sale['id']}"):
+                            available = get_available_seats(game['id'], sale['cat']) + [sale['seat']]
+                            new_seat = st.selectbox(f"Select new seat for {sale['customer']}", available, key=f"new_seat_{sale['id']}")
+                            if st.button(f"Confirm Change", key=f"confirm_change_{sale['id']}"):
+                                sale['seat'] = new_seat
+                                st.success("✅ Seat Changed!")
+                                st.rerun()
+                
+                with col3:
+                    if st.button("🗑️ Delete", key=f"del_sale_{sale['id']}"):
+                        db['sales'] = [s for s in db['sales'] if s['id'] != sale['id']]
+                        st.success("✅ Sale Deleted!")
+                        st.rerun()
 
 # ============== SIDEBAR NAVIGATION ==============
 st.sidebar.markdown("# 🎫 Ticket Management System")
@@ -458,7 +485,7 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Select Page:",
-    ["📅 Calendar View", "🎮 Games Journal", "⚙️ Fixed Categories", "🏆 Fixed Teams", "📊 Sales Report"]
+    ["📅 Calendar View", "🎮 Games Journal", "⚙️ Fixed Categories", "📊 Sales Report"]
 )
 
 st.sidebar.markdown("---")
@@ -492,23 +519,6 @@ if menu == "📅 Calendar View":
             with st.form("new_game_form_cal"):
                 g_name = st.text_input("Game Name")
                 
-                col_team = st.columns(1)
-                with col_team[0]:
-                    st.write("**Team:**")
-                    use_fixed_team = st.radio("Team Option", ["Select Fixed Team", "Add New Team"], key="cal_team_option", horizontal=True)
-                    
-                    if use_fixed_team == "Select Fixed Team":
-                        team_options = list(db['fixed_teams'].keys())
-                        if team_options:
-                            selected_team = st.selectbox("Choose Team", team_options, format_func=lambda x: db['fixed_teams'][x], key="cal_select_team")
-                            team_name = db['fixed_teams'][selected_team]
-                        else:
-                            st.info("No fixed teams yet. Create one in Fixed Teams section.")
-                            team_name = ""
-                    else:
-                        team_name = st.text_input("New Team Name", key="cal_new_team")
-                        save_team = st.checkbox("Save as Fixed Team", key="cal_save_team")
-                
                 col_fixed, col_extra = st.columns(2)
                 
                 with col_fixed:
@@ -525,6 +535,7 @@ if menu == "📅 Calendar View":
                     st.write("**One-Time Category:**")
                     extra_cat_name = st.text_input("Category Name", label_visibility="collapsed", key="cal_extra_cat_name")
                     extra_cat_qty = st.number_input("Ticket Quantity", min_value=0, label_visibility="collapsed", key="cal_extra_qty")
+                    extra_cat_seats = st.text_area("Seats (comma-separated) - Leave empty for empty seats", label_visibility="collapsed", key="cal_extra_seats")
                     save_to_fixed = st.checkbox("Save as Fixed Category", key="cal_save_fixed")
                 
                 col_btn1, col_btn2 = st.columns(2)
@@ -534,14 +545,6 @@ if menu == "📅 Calendar View":
                         if not g_name:
                             st.error("Please enter a game name!")
                         else:
-                            # Save team if needed
-                            if use_fixed_team == "Add New Team":
-                                if not team_name:
-                                    st.error("Please enter team name!")
-                                else:
-                                    if save_team and team_name not in db['fixed_teams'].values():
-                                        db['fixed_teams'][str(uuid.uuid4())[:8]] = team_name
-                            
                             game_cats = {}
                             
                             for cid in selected_fixed:
@@ -549,13 +552,16 @@ if menu == "📅 Calendar View":
                                 game_cats[f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
                             
                             if extra_cat_name:
-                                seats_list = ["" for _ in range(extra_cat_qty)]
+                                if extra_cat_seats:
+                                    seats_list = [s.strip() for s in extra_cat_seats.split(",") if s.strip()]
+                                else:
+                                    seats_list = ["" for _ in range(extra_cat_qty)]
+                                
                                 game_cats[extra_cat_name] = {"qty": extra_cat_qty, "seats": seats_list}
                                 
                                 if save_to_fixed:
                                     db['fixed_cats'][str(uuid.uuid4())[:8]] = {
                                         "name": extra_cat_name,
-                                        "team": team_name,
                                         "qty": extra_cat_qty,
                                         "seats": seats_list,
                                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -565,7 +571,6 @@ if menu == "📅 Calendar View":
                                 "id": str(uuid.uuid4())[:8],
                                 "name": g_name,
                                 "date": selected_date,
-                                "team": team_name,
                                 "cats": game_cats
                             })
                             
@@ -603,8 +608,8 @@ if menu == "📅 Calendar View":
             st.session_state.current_month = last_day.replace(day=1)
             st.rerun()
     
-    # Get calendar for current month with Monday as first day
-    cal = get_calendar_with_monday_start(current_month.year, current_month.month)
+    # Get calendar for current month
+    cal = monthcalendar(current_month.year, current_month.month)
     
     # Display day names (Monday first)
     day_cols = st.columns(7)
@@ -625,27 +630,19 @@ if menu == "📅 Calendar View":
                     date = datetime(current_month.year, current_month.month, day).date()
                     day_games = [g for g in db['games'] if g['date'] == date]
                     
-                    # Create day content as text to avoid button HTML rendering issues
+                    # Create day content
                     st.write(f"**{day}**")
                     
                     for game in day_games:
-                        st.write(f"📌 {game['name']}")
-                    
-                    # Add buttons
-                    col_btn_add, col_btn_view = st.columns(2)
-                    
-                    with col_btn_add:
-                        if st.button("➕", key=f"add_btn_{date}"):
-                            st.session_state.add_game_date = date
-                            st.session_state.show_add_game_form = True
+                        if st.button(f"📌 {game['name']}", key=f"game_btn_{game['id']}"):
+                            st.session_state.view_game_id = game['id']
+                            st.session_state.show_game_details = True
                             st.rerun()
                     
-                    with col_btn_view:
-                        if day_games:
-                            if st.button("👁️", key=f"view_btn_{day_games[0]['id']}"):
-                                st.session_state.view_game_id = day_games[0]['id']
-                                st.session_state.show_game_details = True
-                                st.rerun()
+                    if st.button("➕", key=f"add_btn_{date}"):
+                        st.session_state.add_game_date = date
+                        st.session_state.show_add_game_form = True
+                        st.rerun()
     
     st.markdown("---")
     
@@ -689,23 +686,6 @@ elif menu == "🎮 Games Journal":
                 with st.form("new_game_form_journal"):
                     g_name = st.text_input("Game Name")
                     
-                    col_team = st.columns(1)
-                    with col_team[0]:
-                        st.write("**Team:**")
-                        use_fixed_team = st.radio("Team Option", ["Select Fixed Team", "Add New Team"], key="journal_team_option", horizontal=True)
-                        
-                        if use_fixed_team == "Select Fixed Team":
-                            team_options = list(db['fixed_teams'].keys())
-                            if team_options:
-                                selected_team = st.selectbox("Choose Team", team_options, format_func=lambda x: db['fixed_teams'][x], key="journal_select_team")
-                                team_name = db['fixed_teams'][selected_team]
-                            else:
-                                st.info("No fixed teams yet. Create one in Fixed Teams section.")
-                                team_name = ""
-                        else:
-                            team_name = st.text_input("New Team Name", key="journal_new_team")
-                            save_team = st.checkbox("Save as Fixed Team", key="journal_save_team")
-                    
                     col_fixed, col_extra = st.columns(2)
                     
                     with col_fixed:
@@ -722,6 +702,7 @@ elif menu == "🎮 Games Journal":
                         st.write("**One-Time Category:**")
                         extra_cat_name = st.text_input("Category Name", label_visibility="collapsed", key="journal_extra_cat_name")
                         extra_cat_qty = st.number_input("Ticket Quantity", min_value=0, label_visibility="collapsed", key="journal_extra_qty")
+                        extra_cat_seats = st.text_area("Seats (comma-separated) - Leave empty for empty seats", label_visibility="collapsed", key="journal_extra_seats")
                         save_to_fixed = st.checkbox("Save as Fixed Category", key="journal_save_fixed")
                     
                     col_btn1, col_btn2 = st.columns(2)
@@ -731,14 +712,6 @@ elif menu == "🎮 Games Journal":
                             if not g_name:
                                 st.error("Please enter a game name!")
                             else:
-                                # Save team if needed
-                                if use_fixed_team == "Add New Team":
-                                    if not team_name:
-                                        st.error("Please enter team name!")
-                                    else:
-                                        if save_team and team_name not in db['fixed_teams'].values():
-                                            db['fixed_teams'][str(uuid.uuid4())[:8]] = team_name
-                                
                                 game_cats = {}
                                 
                                 for cid in selected_fixed:
@@ -746,13 +719,16 @@ elif menu == "🎮 Games Journal":
                                     game_cats[f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
                                 
                                 if extra_cat_name:
-                                    seats_list = ["" for _ in range(extra_cat_qty)]
+                                    if extra_cat_seats:
+                                        seats_list = [s.strip() for s in extra_cat_seats.split(",") if s.strip()]
+                                    else:
+                                        seats_list = ["" for _ in range(extra_cat_qty)]
+                                    
                                     game_cats[extra_cat_name] = {"qty": extra_cat_qty, "seats": seats_list}
                                     
                                     if save_to_fixed:
                                         db['fixed_cats'][str(uuid.uuid4())[:8]] = {
                                             "name": extra_cat_name,
-                                            "team": team_name,
                                             "qty": extra_cat_qty,
                                             "seats": seats_list,
                                             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -762,7 +738,6 @@ elif menu == "🎮 Games Journal":
                                     "id": str(uuid.uuid4())[:8],
                                     "name": g_name,
                                     "date": selected_date,
-                                    "team": team_name,
                                     "cats": game_cats
                                 })
                                 
@@ -798,7 +773,6 @@ elif menu == "🎮 Games Journal":
                 games_list.append({
                     '#': len(games_list) + 1,
                     'Game Name': game['name'],
-                    'Team': game.get('team', 'No Team'),
                     'Date': game['date'].strftime('%B %d, %Y'),
                     'Categories': len(game['cats']),
                     'Sales': len(get_game_sales(game['id']))
@@ -832,7 +806,6 @@ elif menu == "⚙️ Fixed Categories":
         with st.expander("➕ Add New Category", expanded=True):
             with st.form("add_fixed"):
                 name = st.text_input("Category Name")
-                team = st.text_input("Team/Club (Optional)")
                 qty = st.number_input("Ticket Quantity", min_value=1)
                 seats_input = st.text_area("Seat List (comma-separated) - Leave empty to create empty seats")
                 
@@ -848,7 +821,6 @@ elif menu == "⚙️ Fixed Categories":
                         
                         db['fixed_cats'][cat_id] = {
                             "name": name,
-                            "team": team,
                             "qty": qty,
                             "seats": seat_list,
                             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -864,12 +836,10 @@ elif menu == "⚙️ Fixed Categories":
         st.subheader("📋 Existing Categories")
         
         for cid, data in list(db['fixed_cats'].items()):
-            team_info = f" - {data.get('team', '')}" if data.get('team') else ""
-            with st.expander(f"🛠️ {data['name']}{team_info} ({data['qty']} seats)", expanded=False):
+            with st.expander(f"🛠️ {data['name']} ({data['qty']} seats)", expanded=False):
                 st.markdown(f"<div class='category-edit-box'>", unsafe_allow_html=True)
                 
                 new_name = st.text_input("Category Name", data['name'], key=f"edit_n_{cid}")
-                new_team = st.text_input("Team/Club", data.get('team', ''), key=f"edit_team_{cid}")
                 new_qty = st.number_input(f"Ticket Quantity", value=data['qty'], min_value=1, key=f"edit_qty_{cid}")
                 new_seats = st.text_area("Seats (comma-separated)", ",".join(data['seats']), key=f"edit_s_{cid}")
                 
@@ -884,7 +854,6 @@ elif menu == "⚙️ Fixed Categories":
                         
                         db['fixed_cats'][cid] = {
                             "name": new_name,
-                            "team": new_team,
                             "qty": new_qty,
                             "seats": seats_list,
                             "created_at": data.get('created_at', '')
@@ -900,64 +869,17 @@ elif menu == "⚙️ Fixed Categories":
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
-# ============== PAGE 4: FIXED TEAMS ==============
-elif menu == "🏆 Fixed Teams":
-    st.header("🏆 Manage Fixed Teams")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        with st.expander("➕ Add New Team", expanded=True):
-            with st.form("add_team"):
-                team_name = st.text_input("Team Name")
-                team_city = st.text_input("City (Optional)")
-                
-                if st.form_submit_button("💾 Save Team"):
-                    if not team_name:
-                        st.error("Please enter a team name!")
-                    else:
-                        team_id = str(uuid.uuid4())[:8]
-                        db['fixed_teams'][team_id] = team_name
-                        st.success("✅ Team Added!")
-                        st.rerun()
-    
-    with col2:
-        st.metric("Total Teams", len(db['fixed_teams']))
-    
-    if db['fixed_teams']:
-        st.markdown("---")
-        st.subheader("📋 Existing Teams")
-        
-        for tid, team_name in list(db['fixed_teams'].items()):
-            with st.expander(f"🏆 {team_name}", expanded=False):
-                st.markdown(f"<div class='category-edit-box'>", unsafe_allow_html=True)
-                
-                new_name = st.text_input("Team Name", team_name, key=f"edit_team_{tid}")
-                
-                col_upd, col_del = st.columns(2)
-                
-                with col_upd:
-                    if st.button("✅ Update Name", key=f"upd_team_{tid}"):
-                        db['fixed_teams'][tid] = new_name
-                        st.success("✅ Updated!")
-                        st.rerun()
-                
-                with col_del:
-                    if st.button("🗑️ Delete Team", key=f"del_team_{tid}"):
-                        del db['fixed_teams'][tid]
-                        st.success("✅ Removed!")
-                        st.rerun()
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-
-# ============== PAGE 5: SALES REPORT ==============
+# ============== PAGE 4: SALES REPORT ==============
 elif menu == "📊 Sales Report":
     st.header("📊 Sales Report & Performance")
     
     if db['sales']:
         # Date range filter
         st.subheader("Filter by Date Range")
-        col_date1, col_date2, col_all = st.columns([2, 2, 1])
+        col_date_type, col_all = st.columns([2, 1])
+        
+        with col_date_type:
+            date_type = st.radio("Filter by:", ["Sale Date", "Game Date"], horizontal=True)
         
         with col_all:
             show_all = st.checkbox("Show All Dates", value=True)
@@ -965,13 +887,18 @@ elif menu == "📊 Sales Report":
         if show_all:
             filtered_sales = db['sales']
         else:
+            col_date1, col_date2 = st.columns(2)
             with col_date1:
                 start_date = st.date_input("Start Date", datetime.now().replace(day=1))
             with col_date2:
                 end_date = st.date_input("End Date", datetime.now())
             
-            filtered_sales = [s for s in db['sales'] 
-                            if start_date <= datetime.strptime(s['game_date'].strftime('%Y-%m-%d'), '%Y-%m-%d').date() <= end_date]
+            if date_type == "Sale Date":
+                filtered_sales = [s for s in db['sales'] 
+                                if start_date <= datetime.strptime(s['created_at'][:10], '%Y-%m-%d').date() <= end_date]
+            else:
+                filtered_sales = [s for s in db['sales'] 
+                                if start_date <= datetime.strptime(s['game_date'].strftime('%Y-%m-%d'), '%Y-%m-%d').date() <= end_date]
         
         # Aggregate sales
         aggregated = {}
