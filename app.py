@@ -18,13 +18,18 @@ st.markdown("""
     .main { background-color: #f8f9fa; }
     .stMetric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                 color: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .calendar-container { width: 100%; }
+    .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 1px;
+        background-color: #ddd;
+        padding: 1px;
+    }
     .calendar-day-box { 
-        border: 2px solid #ddd; 
-        padding: 12px; 
-        min-height: 140px; 
-        border-radius: 8px; 
         background: white;
+        padding: 12px; 
+        min-height: 140px;
+        border-radius: 0px;
         position: relative;
         cursor: pointer;
     }
@@ -33,7 +38,6 @@ st.markdown("""
     }
     .calendar-day-box.empty {
         background: #f5f5f5;
-        border: none;
         cursor: default;
     }
     .calendar-day-number {
@@ -111,13 +115,19 @@ def get_unassigned_tickets(game_id, category_name):
     sales = [s for s in get_game_sales(game_id) if s['cat'] == category_name and (not s.get('seat') or s['seat'] == '')]
     return sales
 
+def format_date(date_obj):
+    """Format date as DD/MM/YYYY"""
+    if isinstance(date_obj, str):
+        return date_obj
+    return date_obj.strftime("%d/%m/%Y")
+
 def display_game_details(game_id):
     """Display full game details"""
     game = next((g for g in db['games'] if g['id'] == game_id), None)
     if not game:
         return
     
-    st.markdown(f"### 🏟️ {game['name']} - {game['date'].strftime('%B %d, %Y')}")
+    st.markdown(f"### 🏟️ {game['name']} - {format_date(game['date'])}")
     
     # Category stats dashboard
     st.write("**📊 Category Status:**")
@@ -198,7 +208,7 @@ def display_game_details(game_id):
                                     "total": u_price,
                                     "game_name": game['name'],
                                     "game_date": game['date'],
-                                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
                                 })
                             # If less seats than quantity, add remaining as unassigned
                             remaining = c_qty - len(sel_seats)
@@ -216,7 +226,7 @@ def display_game_details(game_id):
                                     "total": u_price * remaining,
                                     "game_name": game['name'],
                                     "game_date": game['date'],
-                                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
                                 })
                         else:
                             db['sales'].append({
@@ -232,7 +242,7 @@ def display_game_details(game_id):
                                 "total": u_price * c_qty,
                                 "game_name": game['name'],
                                 "game_date": game['date'],
-                                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
                             })
                         
                         st.success("✅ Sale Recorded!")
@@ -260,59 +270,53 @@ def display_game_details(game_id):
         col_add_cat = st.columns(1)
         with col_add_cat[0]:
             with st.expander("➕ Add New Category to This Game"):
-                with st.form(f"add_cat_to_game_{game['id']}"):
-                    col_fixed_sel, col_new_cat = st.columns(2)
-                    
-                    with col_fixed_sel:
-                        st.write("**Select Fixed Category:**")
-                        use_fixed = st.radio("Category Source", ["Use Fixed", "Create New"], key=f"use_fixed_{game['id']}", horizontal=True)
-                    
-                    with col_new_cat:
-                        pass
-                    
-                    if use_fixed == "Use Fixed":
-                        fixed_cat_options = [c for c in db['fixed_cats'].keys() if db['fixed_cats'][c]['name'] not in game['cats']]
-                        if fixed_cat_options:
-                            selected_fixed = st.selectbox("Choose Fixed Category", fixed_cat_options, 
-                                                         format_func=lambda x: f"{db['fixed_cats'][x]['name']}", 
-                                                         key=f"select_fixed_{game['id']}")
-                            if st.form_submit_button("➕ Add Category"):
-                                f_cat = db['fixed_cats'][selected_fixed]
-                                if f_cat['name'] in game['cats']:
-                                    st.error("Category already exists!")
-                                else:
-                                    game['cats'][f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
-                                    st.success("✅ Category Added!")
-                                    st.rerun()
-                        else:
-                            st.info("All fixed categories already in this game")
-                    else:
-                        new_cat_name = st.text_input("Category Name", key=f"new_cat_name_{game['id']}")
-                        new_cat_qty = st.number_input("Ticket Quantity", min_value=1, key=f"new_cat_qty_{game['id']}")
-                        new_cat_seats = st.text_area("Seats (comma-separated) - Leave empty for empty seats", key=f"new_cat_seats_{game['id']}")
-                        save_as_fixed = st.checkbox("Save as Fixed Category", key=f"save_as_fixed_{game['id']}")
-                        
-                        if st.form_submit_button("➕ Add Category"):
-                            if new_cat_name in game['cats']:
+                use_fixed = st.radio("Category Source", ["Use Fixed", "Create New"], key=f"use_fixed_cat_{game['id']}", horizontal=True)
+                
+                if use_fixed == "Use Fixed":
+                    fixed_cat_options = [c for c in db['fixed_cats'].keys() if db['fixed_cats'][c]['name'] not in game['cats']]
+                    if fixed_cat_options:
+                        selected_fixed = st.selectbox("Choose Fixed Category", fixed_cat_options, 
+                                                     format_func=lambda x: f"{db['fixed_cats'][x]['name']}", 
+                                                     key=f"select_fixed_{game['id']}")
+                        if st.button("➕ Add Fixed Category", key=f"add_fixed_cat_{game['id']}"):
+                            f_cat = db['fixed_cats'][selected_fixed]
+                            if f_cat['name'] in game['cats']:
                                 st.error("Category already exists!")
                             else:
-                                if new_cat_seats:
-                                    seats_list = [s.strip() for s in new_cat_seats.split(",") if s.strip()]
-                                else:
-                                    seats_list = ["" for _ in range(new_cat_qty)]
-                                
-                                game['cats'][new_cat_name] = {"qty": new_cat_qty, "seats": seats_list}
-                                
-                                if save_as_fixed:
-                                    db['fixed_cats'][str(uuid.uuid4())[:8]] = {
-                                        "name": new_cat_name,
-                                        "qty": new_cat_qty,
-                                        "seats": seats_list,
-                                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-                                    }
-                                
+                                game['cats'][f_cat['name']] = {"qty": f_cat['qty'], "seats": list(f_cat['seats'])}
                                 st.success("✅ Category Added!")
                                 st.rerun()
+                    else:
+                        st.info("All fixed categories already in this game")
+                else:
+                    new_cat_name = st.text_input("Category Name", key=f"new_cat_name_{game['id']}")
+                    new_cat_qty = st.number_input("Ticket Quantity", min_value=1, key=f"new_cat_qty_{game['id']}")
+                    new_cat_seats = st.text_area("Seats (comma-separated) - Leave empty for empty seats", key=f"new_cat_seats_{game['id']}")
+                    save_as_fixed = st.checkbox("Save as Fixed Category", key=f"save_as_fixed_{game['id']}")
+                    
+                    if st.button("➕ Add New Category", key=f"add_new_cat_{game['id']}"):
+                        if not new_cat_name:
+                            st.error("Please enter category name!")
+                        elif new_cat_name in game['cats']:
+                            st.error("Category already exists!")
+                        else:
+                            if new_cat_seats:
+                                seats_list = [s.strip() for s in new_cat_seats.split(",") if s.strip()]
+                            else:
+                                seats_list = ["" for _ in range(new_cat_qty)]
+                            
+                            game['cats'][new_cat_name] = {"qty": new_cat_qty, "seats": seats_list}
+                            
+                            if save_as_fixed:
+                                db['fixed_cats'][str(uuid.uuid4())[:8]] = {
+                                    "name": new_cat_name,
+                                    "qty": new_cat_qty,
+                                    "seats": seats_list,
+                                    "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
+                                }
+                            
+                            st.success("✅ Category Added!")
+                            st.rerun()
         
         st.markdown("---")
         
@@ -331,22 +335,10 @@ def display_game_details(game_id):
                     if new_name != c_name and new_name in game['cats']:
                         st.error("Category name already exists!")
                     else:
-                        # Keep assigned seats in place, only update empty ones
-                        old_seats = c_data['seats']
-                        occupied_seats = [s for s in old_seats if s and any(sale['seat'] == s for sale in get_game_sales(game['id']) if sale['cat'] == c_name)]
-                        
                         if new_s:
-                            new_seats_input = [x.strip() for x in new_s.split(",") if x.strip()]
+                            seats_list = [x.strip() for x in new_s.split(",") if x.strip()]
                         else:
-                            new_seats_input = ["" for _ in range(new_qty)]
-                        
-                        # Preserve occupied seats
-                        seats_list = []
-                        for seat in new_seats_input:
-                            if seat in occupied_seats:
-                                seats_list.append(seat)
-                            else:
-                                seats_list.append(seat)
+                            seats_list = ["" for _ in range(new_qty)]
                         
                         if new_name != c_name:
                             game['cats'][new_name] = game['cats'].pop(c_name)
@@ -439,17 +431,32 @@ def display_game_details(game_id):
         if not game_sales:
             st.info("No sales yet for this game.")
         else:
+            # Group by customer and category to show combined sales
+            grouped_sales = {}
+            for sale in game_sales:
+                key = (sale['customer'], sale['cat'])
+                if key not in grouped_sales:
+                    grouped_sales[key] = {
+                        'customer': sale['customer'],
+                        'category': sale['cat'],
+                        'total_qty': 0,
+                        'total_price': 0,
+                        'date': sale['created_at'],
+                        'sales_ids': []
+                    }
+                grouped_sales[key]['total_qty'] += sale['qty']
+                grouped_sales[key]['total_price'] += sale['total']
+                grouped_sales[key]['sales_ids'].append(sale['id'])
+            
             sales_list = []
-            for idx, sale in enumerate(game_sales):
+            for idx, (key, sale_info) in enumerate(grouped_sales.items()):
                 sales_list.append({
                     '#': idx + 1,
-                    'Customer': sale['customer'],
-                    'Category': sale['cat'],
-                    'Seat': sale.get('seat', 'Not Assigned') if sale.get('seat') else 'Not Assigned',
-                    'Qty': sale['qty'],
-                    'Price': f"${sale['price']}",
-                    'Total': f"${sale['total']}",
-                    'Date': sale['created_at']
+                    'Customer': sale_info['customer'],
+                    'Category': sale_info['category'],
+                    'Total Qty': sale_info['total_qty'],
+                    'Total': f"${sale_info['total_price']}",
+                    'Date': sale_info['date']
                 })
             
             df_sales = pd.DataFrame(sales_list)
@@ -459,22 +466,13 @@ def display_game_details(game_id):
             st.subheader("Manage Sales")
             
             for sale in game_sales:
-                col1, col2, col3 = st.columns([3, 1, 1])
+                col1, col2 = st.columns([4, 1])
                 with col1:
-                    st.write(f"{sale['customer']} - {sale['cat']} - Seat: {sale.get('seat', 'Not Assigned') if sale.get('seat') else 'Not Assigned'}")
+                    seat_info = f" - Seat: {sale['seat']}" if sale.get('seat') else ""
+                    st.write(f"{sale['customer']} | {sale['cat']} | {sale['qty']} ticket(s){seat_info} | ${sale['total']}")
                 
                 with col2:
-                    if sale.get('seat'):
-                        if st.button("✏️ Change Seat", key=f"change_seat_{sale['id']}"):
-                            available = get_available_seats(game['id'], sale['cat']) + [sale['seat']]
-                            new_seat = st.selectbox(f"Select new seat for {sale['customer']}", available, key=f"new_seat_{sale['id']}")
-                            if st.button(f"Confirm Change", key=f"confirm_change_{sale['id']}"):
-                                sale['seat'] = new_seat
-                                st.success("✅ Seat Changed!")
-                                st.rerun()
-                
-                with col3:
-                    if st.button("🗑️ Delete", key=f"del_sale_{sale['id']}"):
+                    if st.button("🗑️", key=f"del_sale_{sale['id']}", help="Delete this sale"):
                         db['sales'] = [s for s in db['sales'] if s['id'] != sale['id']]
                         st.success("✅ Sale Deleted!")
                         st.rerun()
@@ -514,7 +512,7 @@ if menu == "📅 Calendar View":
         selected_date = st.session_state.add_game_date
         with st.container():
             st.markdown(f"<div class='game-card'>", unsafe_allow_html=True)
-            st.subheader(f"➕ Add Game for {selected_date.strftime('%A, %B %d, %Y')}")
+            st.subheader(f"➕ Add Game for {format_date(selected_date)}")
             
             with st.form("new_game_form_cal"):
                 g_name = st.text_input("Game Name")
@@ -564,7 +562,7 @@ if menu == "📅 Calendar View":
                                         "name": extra_cat_name,
                                         "qty": extra_cat_qty,
                                         "seats": seats_list,
-                                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                        "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
                                     }
                             
                             db['games'].append({
@@ -616,9 +614,9 @@ if menu == "📅 Calendar View":
     day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     for col_idx, day_name in enumerate(day_names):
         with day_cols[col_idx]:
-            st.markdown(f"<h4 style='text-align: center; color: #667eea;'>{day_name}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='text-align: center; color: #667eea; border-bottom: 2px solid #667eea;'>{day_name}</h4>", unsafe_allow_html=True)
     
-    # Display calendar days
+    # Display calendar days with grid layout
     for week_idx, week in enumerate(cal):
         day_cols = st.columns(7)
         
@@ -630,16 +628,16 @@ if menu == "📅 Calendar View":
                     date = datetime(current_month.year, current_month.month, day).date()
                     day_games = [g for g in db['games'] if g['date'] == date]
                     
-                    # Create day content
+                    # Create day content with border
                     st.write(f"**{day}**")
                     
                     for game in day_games:
-                        if st.button(f"📌 {game['name']}", key=f"game_btn_{game['id']}"):
+                        if st.button(f"📌 {game['name']}", key=f"game_btn_{game['id']}", use_container_width=True):
                             st.session_state.view_game_id = game['id']
                             st.session_state.show_game_details = True
                             st.rerun()
                     
-                    if st.button("➕", key=f"add_btn_{date}"):
+                    if st.button("➕", key=f"add_btn_{date}", use_container_width=True):
                         st.session_state.add_game_date = date
                         st.session_state.show_add_game_form = True
                         st.rerun()
@@ -650,7 +648,7 @@ if menu == "📅 Calendar View":
     st.subheader("📌 Month Summary")
     
     total_games = len([g for g in db['games'] if g['date'].month == current_month.month and g['date'].year == current_month.year])
-    total_sales = len([s for s in db['sales'] if datetime.strptime(s['created_at'][:10], '%Y-%m-%d').month == current_month.month])
+    total_sales = len([s for s in db['sales'] if datetime.strptime(s['created_at'][:10], '%d/%m/%Y').month == current_month.month])
     
     col_stats1, col_stats2, col_stats3 = st.columns(3)
     with col_stats1:
@@ -658,7 +656,7 @@ if menu == "📅 Calendar View":
     with col_stats2:
         st.metric("Tickets Sold", total_sales)
     with col_stats3:
-        total_revenue = sum([s['total'] for s in db['sales'] if datetime.strptime(s['created_at'][:10], '%Y-%m-%d').month == current_month.month])
+        total_revenue = sum([s['total'] for s in db['sales'] if datetime.strptime(s['created_at'][:10], '%d/%m/%Y').month == current_month.month])
         st.metric("Revenue", f"${total_revenue:,.0f}")
 
 # ============== PAGE 2: GAMES JOURNAL ==============
@@ -671,7 +669,7 @@ elif menu == "🎮 Games Journal":
         col_date, col_btn = st.columns([3, 1])
         
         with col_date:
-            selected_date = st.date_input("Select date to view/add games", datetime.now())
+            selected_date = st.date_input("Select date to view/add games", datetime.now(), format="DD/MM/YYYY")
         
         with col_btn:
             if st.button("➕ Add Game", use_container_width=True):
@@ -731,7 +729,7 @@ elif menu == "🎮 Games Journal":
                                             "name": extra_cat_name,
                                             "qty": extra_cat_qty,
                                             "seats": seats_list,
-                                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                            "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
                                         }
                                 
                                 db['games'].append({
@@ -773,7 +771,7 @@ elif menu == "🎮 Games Journal":
                 games_list.append({
                     '#': len(games_list) + 1,
                     'Game Name': game['name'],
-                    'Date': game['date'].strftime('%B %d, %Y'),
+                    'Date': format_date(game['date']),
                     'Categories': len(game['cats']),
                     'Sales': len(get_game_sales(game['id']))
                 })
@@ -823,7 +821,7 @@ elif menu == "⚙️ Fixed Categories":
                             "name": name,
                             "qty": qty,
                             "seats": seat_list,
-                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                            "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
                         }
                         st.success("✅ Category Added!")
                         st.rerun()
@@ -889,16 +887,16 @@ elif menu == "📊 Sales Report":
         else:
             col_date1, col_date2 = st.columns(2)
             with col_date1:
-                start_date = st.date_input("Start Date", datetime.now().replace(day=1))
+                start_date = st.date_input("Start Date", datetime.now().replace(day=1), format="DD/MM/YYYY")
             with col_date2:
-                end_date = st.date_input("End Date", datetime.now())
+                end_date = st.date_input("End Date", datetime.now(), format="DD/MM/YYYY")
             
             if date_type == "Sale Date":
                 filtered_sales = [s for s in db['sales'] 
-                                if start_date <= datetime.strptime(s['created_at'][:10], '%Y-%m-%d').date() <= end_date]
+                                if start_date <= datetime.strptime(s['created_at'][:10], '%d/%m/%Y').date() <= end_date]
             else:
                 filtered_sales = [s for s in db['sales'] 
-                                if start_date <= datetime.strptime(s['game_date'].strftime('%Y-%m-%d'), '%Y-%m-%d').date() <= end_date]
+                                if start_date <= s['game_date'] <= end_date]
         
         # Aggregate sales
         aggregated = {}
@@ -909,24 +907,26 @@ elif menu == "📊 Sales Report":
                     'customer': sale['customer'],
                     'category': sale['cat'],
                     'game': sale['game_name'],
-                    'date': sale['game_date'],
+                    'date': format_date(sale['game_date']),
                     'qty': 0,
                     'price_per_unit': sale['price'],
                     'total': 0,
                     'cost': 0,
                     'profit': 0,
-                    'created_at': sale['created_at']
+                    'created_at': sale['created_at'],
+                    'sale_ids': []
                 }
             aggregated[key]['qty'] += sale['qty']
             aggregated[key]['total'] += sale['total']
             aggregated[key]['cost'] += sale.get('cost', 0) * sale['qty']
+            aggregated[key]['sale_ids'].append(sale['id'])
         
         report_data = list(aggregated.values())
         for row in report_data:
             row['profit'] = row['total'] - row['cost']
         
         df = pd.DataFrame(report_data)
-        df.columns = ['Customer', 'Category', 'Game', 'Game Date', 'Quantity', 'Price/Unit', 'Total Paid', 'Cost', 'Profit', 'Sale Date']
+        df.columns = ['Customer', 'Category', 'Game', 'Game Date', 'Quantity', 'Price/Unit', 'Total Paid', 'Cost', 'Profit', 'Sale Date', 'Sale IDs']
         
         # Display metrics
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -958,11 +958,27 @@ elif menu == "📊 Sales Report":
             (df['Category'].isin(selected_cat))
         ].sort_values(by=sort_by, ascending=False)
         
-        # Add numbering
+        # Add numbering and remove Sale IDs column for display
         df_filtered_display = df_filtered.copy()
         df_filtered_display.insert(0, '#', range(1, len(df_filtered_display) + 1))
+        df_filtered_display = df_filtered_display.drop('Sale IDs', axis=1)
         
         st.dataframe(df_filtered_display, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.subheader("Manage Sales")
+        
+        for idx, row in df_filtered.iterrows():
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(f"{row['Customer']} | {row['Category']} | {row['Game']} | {row['Quantity']} ticket(s) | ${row['Total Paid']}")
+            
+            with col2:
+                if st.button("🗑️", key=f"del_sales_{idx}", help="Delete this sale"):
+                    for sale_id in row['Sale IDs']:
+                        db['sales'] = [s for s in db['sales'] if s['id'] != sale_id]
+                    st.success("✅ Sale Deleted!")
+                    st.rerun()
         
         st.markdown("---")
         
@@ -970,11 +986,11 @@ elif menu == "📊 Sales Report":
         col_csv, col_json = st.columns(2)
         
         with col_csv:
-            csv = df_filtered.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Export to CSV", csv, "sales_report.csv", "text/csv")
+            csv = df_filtered.drop('Sale IDs', axis=1).to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 Export to CSV", csv, f"sales_report_{datetime.now().strftime('%d_%m_%Y')}.csv", "text/csv")
         
         with col_json:
-            json_str = json.dumps(df_filtered.to_dict(orient='records'), ensure_ascii=False, indent=2).encode('utf-8')
-            st.download_button("📥 Export to JSON", json_str, "sales_report.json", "application/json")
+            json_str = json.dumps(df_filtered.drop('Sale IDs', axis=1).to_dict(orient='records'), ensure_ascii=False, indent=2).encode('utf-8')
+            st.download_button("📥 Export to JSON", json_str, f"sales_report_{datetime.now().strftime('%d_%m_%Y')}.json", "application/json")
     else:
         st.info("📭 No sales data to display yet.")
