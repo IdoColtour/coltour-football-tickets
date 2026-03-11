@@ -3,19 +3,18 @@ import pandas as pd
 from datetime import datetime, timedelta
 import uuid
 import json
-import os
 from calendar import monthcalendar, month_name
 
 # ============== PAGE CONFIG & STYLING ==============
 st.set_page_config(
-    page_title="🎫 ניהול כרטיסים PRO",
+    page_title="🎫 Ticket Management System PRO",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 st.markdown("""
     <style>
-    * { direction: rtl; text-align: right; }
+    * { direction: ltr; text-align: left; }
     .main { background-color: #f8f9fa; }
     .stMetric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                 color: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -26,9 +25,10 @@ st.markdown("""
     .game-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 15px 0; }
     .calendar-header { font-size: 20px; font-weight: bold; text-align: center; padding: 15px; 
                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; }
-    .calendar-day { border: 1px solid #ddd; padding: 10px; height: 100px; border-radius: 6px; background: white; overflow-y: auto; }
+    .calendar-day { border: 1px solid #ddd; padding: 10px; height: 120px; border-radius: 6px; background: white; overflow-y: auto; }
+    .calendar-day-number { font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 8px; }
     .calendar-event { background-color: #667eea; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-bottom: 3px; }
-    .tab-container { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .calendar-add-btn { background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; }
     .category-edit-box { background: #f0f2f6; padding: 15px; border-radius: 8px; margin: 10px 0; }
     </style>
     """, unsafe_allow_html=True)
@@ -43,6 +43,9 @@ if 'db' not in st.session_state:
 
 if 'show_add_game' not in st.session_state:
     st.session_state.show_add_game = False
+
+if 'selected_date' not in st.session_state:
+    st.session_state.selected_date = None
 
 if 'current_month' not in st.session_state:
     st.session_state.current_month = datetime.now()
@@ -69,44 +72,45 @@ def get_available_seats(game_id, category_name):
     return [s for s in all_seats if s not in occupied and s]
 
 # ============== SIDEBAR NAVIGATION ==============
-st.sidebar.markdown("# 🎫 ניהול מערך כרטיסים")
+st.sidebar.markdown("# 🎫 Ticket Management System")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
-    "בחר דף:",
-    ["📅 לוח שנה", "🎮 יומן משחקים", "⚙️ קטגוריות קבועות", "📊 דוח מכירות"]
+    "Select Page:",
+    ["📅 Calendar View", "🎮 Games Journal", "⚙️ Fixed Categories", "📊 Sales Report"]
 )
 
 st.sidebar.markdown("---")
-st.sidebar.info("📱 כל הנתונים שלך שמורים בטוח באפליקציה")
+st.sidebar.info("📱 All your data is safely stored in the app")
 
 # ============== PAGE 1: CALENDAR VIEW ==============
-if menu == "📅 לוח שנה":
-    st.header("📅 לוח שנה ניהול משחקים")
+if menu == "📅 Calendar View":
+    st.header("📅 Calendar - Event Management")
     
     col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
     
     current_month = st.session_state.current_month
     
     with col_nav1:
-        if st.button("⬅️ חודש קודם"):
+        if st.button("⬅️ Previous Month"):
             st.session_state.current_month = current_month - timedelta(days=current_month.day)
             st.rerun()
     
     with col_nav2:
-        st.markdown(f"<div class='calendar-header'>{month_name[current_month.month]} {current_month.year}</div>", unsafe_allow_html=True)
+        month_year = f"{month_name[current_month.month]} {current_month.year}"
+        st.markdown(f"<div class='calendar-header'>{month_year}</div>", unsafe_allow_html=True)
     
     with col_nav3:
-        if st.button("חודש הבא ➡️"):
-            st.session_state.current_month = current_month + timedelta(days=32)
-            st.session_state.current_month = st.session_state.current_month.replace(day=1)
+        if st.button("Next Month ➡️"):
+            next_month = current_month + timedelta(days=32)
+            st.session_state.current_month = next_month.replace(day=1)
             st.rerun()
     
     # Display calendar grid
     cal = monthcalendar(current_month.year, current_month.month)
     
     days_header = st.columns(7)
-    day_names = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
+    day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     for idx, day_name in enumerate(day_names):
         with days_header[idx]:
             st.markdown(f"<h4 style='text-align:center; color:#667eea;'>{day_name}</h4>", unsafe_allow_html=True)
@@ -116,18 +120,18 @@ if menu == "📅 לוח שנה":
         for day_idx, day in enumerate(week):
             with week_cols[day_idx]:
                 if day == 0:
-                    st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
+                    st.markdown("<div style='height:120px;'></div>", unsafe_allow_html=True)
                 else:
                     date = datetime(current_month.year, current_month.month, day).date()
                     day_games = [g for g in db['games'] if g['date'] == date]
                     
                     st.markdown(f"<div class='calendar-day'>", unsafe_allow_html=True)
-                    st.markdown(f"<b style='font-size:16px;'>{day}</b>")
+                    st.markdown(f"<div class='calendar-day-number'>{day}</div>", unsafe_allow_html=True)
                     
                     for game in day_games:
                         st.markdown(f"<div class='calendar-event'>{game['name']}</div>", unsafe_allow_html=True)
                     
-                    if st.button("➕", key=f"add_game_{date}"):
+                    if st.button("➕ Add", key=f"add_game_{date}"):
                         st.session_state.selected_date = date
                         st.session_state.show_add_game = True
                         st.rerun()
@@ -135,58 +139,58 @@ if menu == "📅 לוח שנה":
                     st.markdown("</div>", unsafe_allow_html=True)
     
     st.markdown("---")
-    st.subheader("📌 סיכום חודש")
+    st.subheader("📌 Month Summary")
     total_games = len([g for g in db['games'] if g['date'].month == current_month.month and g['date'].year == current_month.year])
     total_sales = len([s for s in db['sales'] if datetime.strptime(s['created_at'][:10], '%Y-%m-%d').month == current_month.month])
     
     col_stats1, col_stats2, col_stats3 = st.columns(3)
     with col_stats1:
-        st.metric("משחקים בחודש", total_games)
+        st.metric("Games This Month", total_games)
     with col_stats2:
-        st.metric("כרטיסים שנמכרו", total_sales)
+        st.metric("Tickets Sold", total_sales)
     with col_stats3:
         total_revenue = sum([s['total'] for s in db['sales'] if datetime.strptime(s['created_at'][:10], '%Y-%m-%d').month == current_month.month])
-        st.metric("הכנסות", f"₪{total_revenue:,.0f}")
+        st.metric("Revenue", f"${total_revenue:,.0f}")
 
 # ============== PAGE 2: GAMES JOURNAL ==============
-elif menu == "🎮 יומן משחקים":
-    st.header("🎮 יומן ומעקב משחקים")
+elif menu == "🎮 Games Journal":
+    st.header("🎮 Games Journal & Tracking")
     
     col_date, col_btn = st.columns([3, 1])
     
     with col_date:
-        selected_date = st.date_input("בחר תאריך לצפייה/הוספה", datetime.now())
+        selected_date = st.date_input("Select date to view/add games", datetime.now())
     
     with col_btn:
-        if st.button("➕ הוסף משחק", use_container_width=True):
+        if st.button("➕ Add Game", use_container_width=True):
             st.session_state.selected_date = selected_date
             st.session_state.show_add_game = True
     
     # Add new game form
     if st.session_state.get('show_add_game'):
-        st.markdown("### ➕ משחק חדש")
+        st.markdown("### ➕ Create New Game")
         with st.form("new_game_form"):
-            g_name = st.text_input("שם המשחק")
+            g_name = st.text_input("Game Name")
             
             col_fixed, col_extra = st.columns(2)
             
             with col_fixed:
-                st.write("**קטגוריות קבועות להוספה:**")
+                st.write("**Fixed Categories to Add:**")
                 selected_fixed = st.multiselect(
-                    "בחר קטגוריות",
+                    "Choose categories",
                     options=list(db['fixed_cats'].keys()),
-                    format_func=lambda x: f"{db['fixed_cats'][x]['name']} ({db['fixed_cats'][x]['qty']} כרטיסים)",
+                    format_func=lambda x: f"{db['fixed_cats'][x]['name']} ({db['fixed_cats'][x]['qty']} tickets)",
                     label_visibility="collapsed"
                 )
             
             with col_extra:
-                st.write("**קטגוריה חד-פעמית:**")
-                extra_cat_name = st.text_input("שם קטגוריה", label_visibility="collapsed")
-                extra_cat_qty = st.number_input("כמות כרטיסים", min_value=0, label_visibility="collapsed")
-                extra_cat_seats = st.text_area("מקומות (מופרדים בפסיק)", label_visibility="collapsed")
-                save_to_fixed = st.checkbox("שמור כקטגוריה קבועה")
+                st.write("**One-Time Category:**")
+                extra_cat_name = st.text_input("Category Name", label_visibility="collapsed", key="extra_cat_name_input")
+                extra_cat_qty = st.number_input("Ticket Quantity", min_value=0, label_visibility="collapsed")
+                extra_cat_seats = st.text_area("Seats (comma-separated)", label_visibility="collapsed")
+                save_to_fixed = st.checkbox("Save as Fixed Category for Future Use")
             
-            if st.form_submit_button("✅ צור משחק"):
+            if st.form_submit_button("✅ Create Game"):
                 game_cats = {}
                 
                 for cid in selected_fixed:
@@ -219,7 +223,7 @@ elif menu == "🎮 יומן משחקים":
     day_games = [g for g in db['games'] if g['date'] == selected_date]
     
     if not day_games:
-        st.info("📌 אין משחקים רשומים לתאריך זה.")
+        st.info("📌 No games scheduled for this date.")
     else:
         for game in day_games:
             with st.container():
@@ -227,7 +231,7 @@ elif menu == "🎮 יומן משחקים":
                 st.markdown(f"### 🏟️ {game['name']}")
                 
                 # Category stats dashboard
-                st.write("**📊 סטטוס קטגוריות:**")
+                st.write("**📊 Category Status:**")
                 cols = st.columns(len(game['cats']) if game['cats'] else 1)
                 
                 for idx, (c_name, c_data) in enumerate(game['cats'].items()):
@@ -237,53 +241,53 @@ elif menu == "🎮 יומן משחקים":
                         <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                                     color: white; padding: 15px; border-radius: 8px; text-align: center;'>
                             <div style='font-size: 24px; font-weight: bold;'>{stats['sold']}</div>
-                            <div style='font-size: 12px; opacity: 0.9;'>כרטיסים נמכרו</div>
+                            <div style='font-size: 12px; opacity: 0.9;'>Tickets Sold</div>
                             <div style='font-size: 11px; margin-top: 8px; opacity: 0.8;'>
-                                {stats['assigned']} / {len([s for s in c_data['seats'] if s])} מקומות שנקבעו
+                                {stats['assigned']} / {len([s for s in c_data['seats'] if s])} Seats Assigned
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
                 
                 # Tabs
-                tab1, tab2, tab3, tab4 = st.tabs(["🛒 מכירה חדשה", "🪑 מפת מקומות", "✏️ ערוך קטגוריות", "🔄 הקצה מקומות"])
+                tab1, tab2, tab3, tab4 = st.tabs(["🛒 New Sale", "🪑 Seat Map", "✏️ Edit Categories", "🔄 Assign Seats"])
                 
                 with tab1:
-                    st.write("**הוסף מכירה חדשה**")
+                    st.write("**Add New Sale**")
                     with st.form(f"sale_{game['id']}"):
                         col_cat, col_qty = st.columns(2)
                         
                         with col_cat:
-                            cat_sel = st.selectbox("קטגוריה", list(game['cats'].keys()), key=f"cat_{game['id']}")
+                            cat_sel = st.selectbox("Category", list(game['cats'].keys()), key=f"cat_{game['id']}")
                         
                         with col_qty:
-                            c_qty = st.number_input("כמות כרטיסים", min_value=1, step=1, key=f"qty_{game['id']}")
+                            c_qty = st.number_input("Quantity", min_value=1, step=1, key=f"qty_{game['id']}")
                         
-                        c_name = st.text_input("שם לקוח")
-                        c_email = st.text_input("אימייל (אופציונלי)")
+                        c_name = st.text_input("Customer Name")
+                        c_email = st.text_input("Email (Optional)")
                         
                         col_price, col_cost = st.columns(2)
                         with col_price:
-                            u_price = st.number_input("מחיר ליחידה", min_value=0, key=f"price_{game['id']}")
+                            u_price = st.number_input("Price per Unit", min_value=0, key=f"price_{game['id']}")
                         with col_cost:
-                            u_cost = st.number_input("עלות ליחידה", min_value=0, key=f"cost_{game['id']}")
+                            u_cost = st.number_input("Cost per Unit", min_value=0, key=f"cost_{game['id']}")
                         
-                        st.write("**הקצאת מקומות:**")
-                        assign_now = st.checkbox("הקצה מקומות עכשיו", value=False)
+                        st.write("**Seat Assignment:**")
+                        assign_now = st.checkbox("Assign Seats Now", value=False)
                         
                         sel_seats = []
                         if assign_now:
                             available = get_available_seats(game['id'], cat_sel)
-                            sel_seats = st.multiselect(f"בחר {c_qty} מקומות (יש {len(available)} פנויים)", available, key=f"seats_{game['id']}")
+                            sel_seats = st.multiselect(f"Choose {c_qty} Seats (Available: {len(available)})", available, key=f"seats_{game['id']}")
                         
-                        if st.form_submit_button("✅ אשר מכירה"):
+                        if st.form_submit_button("✅ Confirm Sale"):
                             stats = get_category_stats(game['id'], cat_sel)
                             available_inv = game['cats'][cat_sel]['qty']
                             
                             if stats['sold'] + c_qty > available_inv:
-                                st.warning(f"⚠️ זהירות: מכירה זו תחרוג מהמלאי ({stats['sold']} + {c_qty} > {available_inv})")
+                                st.warning(f"⚠️ Warning: This sale exceeds inventory ({stats['sold']} + {c_qty} > {available_inv})")
                             
                             if assign_now and len(sel_seats) != c_qty:
-                                st.error(f"❌ עליך לבחור בדיוק {c_qty} מקומות!")
+                                st.error(f"❌ Please select exactly {c_qty} seats!")
                             else:
                                 if assign_now and sel_seats:
                                     for seat in sel_seats:
@@ -319,65 +323,75 @@ elif menu == "🎮 יומן משחקים":
                                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                                     })
                                 
-                                st.success("✅ המכירה בוצעה!")
+                                st.success("✅ Sale Recorded!")
                                 st.rerun()
                 
                 with tab2:
-                    cat_view = st.selectbox("ראה מקומות עבור:", list(game['cats'].keys()), key=f"view_{game['id']}")
+                    cat_view = st.selectbox("View Seats for:", list(game['cats'].keys()), key=f"view_{game['id']}")
                     seat_map = []
                     
                     for s in game['cats'][cat_view]['seats']:
                         if not s:
                             continue
-                        owner = next((sl['customer'] for sl in get_game_sales(game['id']) if sl['cat'] == cat_view and sl['seat'] == s), "✅ פנוי")
-                        status_color = "🔴 תפוס" if owner != "✅ פנוי" else "🟢 פנוי"
-                        seat_map.append({"מקום": s, f"{status_color}": owner})
+                        owner = next((sl['customer'] for sl in get_game_sales(game['id']) if sl['cat'] == cat_view and sl['seat'] == s), "✅ Available")
+                        status_color = "🔴 Occupied" if owner != "✅ Available" else "🟢 Available"
+                        seat_map.append({"Seat": s, f"{status_color}": owner})
                     
                     if seat_map:
                         st.table(pd.DataFrame(seat_map))
                     else:
-                        st.info("אין מקומות בקטגוריה זו.")
+                        st.info("No seats in this category.")
                 
                 with tab3:
-                    st.warning("⚠️ שינויים כאן ישפיעו רק על המשחק הזה!")
+                    st.warning("⚠️ Changes here affect only this game!")
                     for c_name, c_data in game['cats'].items():
                         st.markdown(f"<div class='category-edit-box'>", unsafe_allow_html=True)
                         st.write(f"**{c_name}**")
                         
-                        new_qty = st.number_input(f"כמות כרטיסים", value=c_data['qty'], key=f"qty_edit_{game['id']}_{c_name}")
-                        new_s = st.text_area(f"מקומות (מופרדים בפסיק)", ",".join(c_data['seats']), key=f"loc_edit_{game['id']}_{c_name}")
+                        new_qty = st.number_input(f"Ticket Quantity", value=c_data['qty'], key=f"qty_edit_{game['id']}_{c_name}")
+                        new_name = st.text_input(f"Category Name", value=c_name, key=f"name_edit_{game['id']}_{c_name}")
+                        new_s = st.text_area(f"Seats (comma-separated)", ",".join(c_data['seats']), key=f"loc_edit_{game['id']}_{c_name}")
                         
-                        if st.button(f"🔄 עדכן {c_name}", key=f"update_{game['id']}_{c_name}"):
+                        if st.button(f"🔄 Update {c_name}", key=f"update_{game['id']}_{c_name}"):
                             seats_list = [x.strip() for x in new_s.split(",") if x.strip()]
-                            game['cats'][c_name]['seats'] = seats_list
-                            game['cats'][c_name]['qty'] = new_qty
-                            st.success("✅ עודכן!")
-                            st.rerun()
+                            # Update the category name if it changed
+                            if new_name != c_name and new_name in game['cats']:
+                                st.error("Category name already exists!")
+                            else:
+                                if new_name != c_name:
+                                    game['cats'][new_name] = game['cats'].pop(c_name)
+                                    game['cats'][new_name]['seats'] = seats_list
+                                    game['cats'][new_name]['qty'] = new_qty
+                                else:
+                                    game['cats'][c_name]['seats'] = seats_list
+                                    game['cats'][c_name]['qty'] = new_qty
+                                st.success("✅ Updated!")
+                                st.rerun()
                         
                         st.markdown("</div>", unsafe_allow_html=True)
                 
                 with tab4:
-                    st.write("**הקצה מקומות לכרטיסים ללא הקצאה**")
+                    st.write("**Assign Seats to Unassigned Tickets**")
                     
                     unassigned_sales = [s for s in get_game_sales(game['id']) if not s.get('seat') or s['seat'] == '']
                     
                     if not unassigned_sales:
-                        st.info("✅ כל הכ��טיסים הוקצו!")
+                        st.info("✅ All tickets have been assigned!")
                     else:
                         for idx, sale in enumerate(unassigned_sales):
-                            st.markdown(f"**{idx+1}. {sale['customer']} - {sale['cat']} ({sale['qty']} כרטיסים)**")
+                            st.markdown(f"**{idx+1}. {sale['customer']} - {sale['cat']} ({sale['qty']} tickets)**")
                             
                             available = get_available_seats(game['id'], sale['cat'])
                             
                             selected = st.multiselect(
-                                f"בחר {sale['qty']} מקומות",
+                                f"Choose {sale['qty']} Seats",
                                 available,
                                 key=f"assign_{sale['id']}"
                             )
                             
-                            if st.button(f"✅ הקצה", key=f"btn_assign_{sale['id']}"):
+                            if st.button(f"✅ Assign", key=f"btn_assign_{sale['id']}"):
                                 if len(selected) != sale['qty']:
-                                    st.error(f"בחר בדיוק {sale['qty']} מקומות!")
+                                    st.error(f"Please select exactly {sale['qty']} seats!")
                                 else:
                                     db['sales'] = [s for s in db['sales'] if s['id'] != sale['id']]
                                     for seat in selected:
@@ -396,25 +410,25 @@ elif menu == "🎮 יומן משחקים":
                                             "game_date": sale['game_date'],
                                             "created_at": sale['created_at']
                                         })
-                                    st.success("✅ הוקצו!")
+                                    st.success("✅ Seats Assigned!")
                                     st.rerun()
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # ============== PAGE 3: FIXED CATEGORIES ==============
-elif menu == "⚙️ קטגוריות קבועות":
-    st.header("⚙️ הגדרת קטגוריות קבועות")
+elif menu == "⚙️ Fixed Categories":
+    st.header("⚙️ Manage Fixed Categories")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        with st.expander("➕ הוסף קטגוריה חדשה", expanded=True):
+        with st.expander("➕ Add New Category", expanded=True):
             with st.form("add_fixed"):
-                name = st.text_input("שם הקטגוריה")
-                qty = st.number_input("כמות כרטיסים ברירת מחדל", min_value=1)
-                seats = st.text_area("רשימת מקומות (מופרדים בפסיק) - אם ריק, יווצרו אוטומטית")
+                name = st.text_input("Category Name")
+                qty = st.number_input("Default Ticket Quantity", min_value=1)
+                seats = st.text_area("Seat List (comma-separated) - Leave empty for auto-generation")
                 
-                if st.form_submit_button("💾 שמור במערכת"):
+                if st.form_submit_button("💾 Save Category"):
                     cat_id = str(uuid.uuid4())[:8]
                     seat_list = [s.strip() for s in seats.split(",")] if seats else [str(i) for i in range(1, qty+1)]
                     db['fixed_cats'][cat_id] = {
@@ -423,28 +437,28 @@ elif menu == "⚙️ קטגוריות קבועות":
                         "seats": seat_list,
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                     }
-                    st.success("✅ הקטגוריה נוספה!")
+                    st.success("✅ Category Added!")
                     st.rerun()
     
     with col2:
-        st.metric("סה\"כ קטגוריות", len(db['fixed_cats']))
+        st.metric("Total Categories", len(db['fixed_cats']))
     
     if db['fixed_cats']:
         st.markdown("---")
-        st.subheader("📋 רשימת קטגוריות קיימות")
+        st.subheader("📋 Existing Categories")
         
         for cid, data in list(db['fixed_cats'].items()):
-            with st.expander(f"🛠️ {data['name']} ({data['qty']} מקומות)", expanded=False):
+            with st.expander(f"🛠️ {data['name']} ({data['qty']} seats)", expanded=False):
                 st.markdown(f"<div class='category-edit-box'>", unsafe_allow_html=True)
                 
-                new_name = st.text_input("שם הקטגוריה", data['name'], key=f"edit_n_{cid}")
-                new_qty = st.number_input(f"כמות כרטיסים", value=data['qty'], min_value=1, key=f"edit_qty_{cid}")
-                new_seats = st.text_area("מקומות (מופרדים בפסיק)", ",".join(data['seats']), key=f"edit_s_{cid}")
+                new_name = st.text_input("Category Name", data['name'], key=f"edit_n_{cid}")
+                new_qty = st.number_input(f"Ticket Quantity", value=data['qty'], min_value=1, key=f"edit_qty_{cid}")
+                new_seats = st.text_area("Seats (comma-separated)", ",".join(data['seats']), key=f"edit_s_{cid}")
                 
                 col_upd, col_del = st.columns(2)
                 
                 with col_upd:
-                    if st.button("✅ עדכן שינויים", key=f"upd_{cid}"):
+                    if st.button("✅ Update Changes", key=f"upd_{cid}"):
                         seats_list = [s.strip() for s in new_seats.split(",") if s.strip()]
                         db['fixed_cats'][cid] = {
                             "name": new_name,
@@ -452,20 +466,20 @@ elif menu == "⚙️ קטגוריות קבועות":
                             "seats": seats_list if seats_list else [str(i) for i in range(1, new_qty+1)],
                             "created_at": data.get('created_at', '')
                         }
-                        st.success("✅ עודכנה!")
+                        st.success("✅ Updated!")
                         st.rerun()
                 
                 with col_del:
-                    if st.button("🗑️ מחק קטגוריה", key=f"del_{cid}"):
+                    if st.button("🗑️ Delete Category", key=f"del_{cid}"):
                         del db['fixed_cats'][cid]
-                        st.success("✅ הוסרה!")
+                        st.success("✅ Removed!")
                         st.rerun()
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # ============== PAGE 4: SALES REPORT ==============
-elif menu == "📊 דוח מכירות":
-    st.header("📊 דוח מכירות וביצועים")
+elif menu == "📊 Sales Report":
+    st.header("📊 Sales Report & Performance")
     
     if db['sales']:
         # Aggregate sales
@@ -494,18 +508,18 @@ elif menu == "📊 דוח מכירות":
             row['profit'] = row['total'] - row['cost']
         
         df = pd.DataFrame(report_data)
-        df.columns = ['לקוח', 'קטגוריה', 'משחק', 'תאריך משחק', 'כמות', 'מחיר ליחידה', 'סה"כ שולם', 'עלות', 'רווח', 'תאריך מכירה']
+        df.columns = ['Customer', 'Category', 'Game', 'Game Date', 'Quantity', 'Price/Unit', 'Total Paid', 'Cost', 'Profit', 'Sale Date']
         
         # Display metrics
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         with col_m1:
-            st.metric("סה\"כ מכירות", len(db['sales']))
+            st.metric("Total Sales", len(db['sales']))
         with col_m2:
-            st.metric("סה\"כ כרטיסים", df['כמות'].sum())
+            st.metric("Total Tickets", df['Quantity'].sum())
         with col_m3:
-            st.metric("סה\"כ הכנסות", f"₪{df['סה\"כ שולם'].sum():,.0f}")
+            st.metric("Total Revenue", f"${df['Total Paid'].sum():,.0f}")
         with col_m4:
-            st.metric("סה\"כ רווח", f"₪{df['רווח'].sum():,.0f}")
+            st.metric("Total Profit", f"${df['Profit'].sum():,.0f}")
         
         st.markdown("---")
         
@@ -513,17 +527,17 @@ elif menu == "📊 דוח מכירות":
         col_filter1, col_filter2, col_filter3 = st.columns(3)
         
         with col_filter1:
-            selected_game = st.multiselect("משחקים", df['משחק'].unique(), default=df['משחק'].unique())
+            selected_game = st.multiselect("Games", df['Game'].unique(), default=df['Game'].unique())
         
         with col_filter2:
-            selected_cat = st.multiselect("קטגוריות", df['קטגוריה'].unique(), default=df['קטגוריה'].unique())
+            selected_cat = st.multiselect("Categories", df['Category'].unique(), default=df['Category'].unique())
         
         with col_filter3:
-            sort_by = st.selectbox("מיין לפי", ['תאריך מכירה', 'סה"כ שולם', 'כמות'])
+            sort_by = st.selectbox("Sort By", ['Sale Date', 'Total Paid', 'Quantity'])
         
         df_filtered = df[
-            (df['משחק'].isin(selected_game)) &
-            (df['קטגוריה'].isin(selected_cat))
+            (df['Game'].isin(selected_game)) &
+            (df['Category'].isin(selected_cat))
         ].sort_values(by=sort_by, ascending=False)
         
         st.dataframe(df_filtered, use_container_width=True, hide_index=True)
@@ -535,10 +549,10 @@ elif menu == "📊 דוח מכירות":
         
         with col_csv:
             csv = df_filtered.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 ייצוא ל-CSV", csv, "sales_report.csv", "text/csv")
+            st.download_button("📥 Export to CSV", csv, "sales_report.csv", "text/csv")
         
         with col_json:
             json_str = json.dumps(df_filtered.to_dict(orient='records'), ensure_ascii=False, indent=2).encode('utf-8')
-            st.download_button("📥 ייצוא ל-JSON", json_str, "sales_report.json", "application/json")
+            st.download_button("📥 Export to JSON", json_str, "sales_report.json", "application/json")
     else:
-        st.info("📭 אין נתוני מכירות להצגה עדיין.")
+        st.info("📭 No sales data to display yet.")
