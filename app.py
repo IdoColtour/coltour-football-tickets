@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import uuid
 import json
-from calendar import monthcalendar, month_name
+from calendar import monthcalendar, month_name, weekday, MONDAY
 
 # ============== PAGE CONFIG & STYLING ==============
 st.set_page_config(
@@ -111,6 +111,12 @@ def get_unassigned_tickets(game_id, category_name):
     """Get unassigned sales for a category"""
     sales = [s for s in get_game_sales(game_id) if s['cat'] == category_name and (not s.get('seat') or s['seat'] == '')]
     return sales
+
+def get_calendar_with_monday_start(year, month):
+    """Get calendar with Monday as first day of week"""
+    cal = monthcalendar(year, month)
+    # monthcalendar returns weeks starting with Monday by default
+    return cal
 
 def display_game_details(game_id):
     """Display full game details"""
@@ -481,7 +487,7 @@ if menu == "📅 Calendar View":
         selected_date = st.session_state.add_game_date
         with st.container():
             st.markdown(f"<div class='game-card'>", unsafe_allow_html=True)
-            st.subheader(f"➕ Add Game for {selected_date.strftime('%B %d, %Y')}")
+            st.subheader(f"➕ Add Game for {selected_date.strftime('%A, %B %d, %Y')}")
             
             with st.form("new_game_form_cal"):
                 g_name = st.text_input("Game Name")
@@ -597,12 +603,12 @@ if menu == "📅 Calendar View":
             st.session_state.current_month = last_day.replace(day=1)
             st.rerun()
     
-    # Get calendar for current month
-    cal = monthcalendar(current_month.year, current_month.month)
+    # Get calendar for current month with Monday as first day
+    cal = get_calendar_with_monday_start(current_month.year, current_month.month)
     
-    # Display day names
+    # Display day names (Monday first)
     day_cols = st.columns(7)
-    day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     for col_idx, day_name in enumerate(day_names):
         with day_cols[col_idx]:
             st.markdown(f"<h4 style='text-align: center; color: #667eea;'>{day_name}</h4>", unsafe_allow_html=True)
@@ -619,23 +625,27 @@ if menu == "📅 Calendar View":
                     date = datetime(current_month.year, current_month.month, day).date()
                     day_games = [g for g in db['games'] if g['date'] == date]
                     
-                    # Create clickable day box
-                    day_html = f"<div class='calendar-day-box'>"
-                    day_html += f"<div class='calendar-day-number'>{day}</div>"
+                    # Create day content as text to avoid button HTML rendering issues
+                    st.write(f"**{day}**")
                     
                     for game in day_games:
-                        day_html += f"<div class='calendar-game-item'>{game['name']}</div>"
+                        st.write(f"📌 {game['name']}")
                     
-                    day_html += "</div>"
+                    # Add buttons
+                    col_btn_add, col_btn_view = st.columns(2)
                     
-                    if st.button(day_html, key=f"day_{date}", use_container_width=True):
-                        if day_games:
-                            st.session_state.view_game_id = day_games[0]['id']
-                            st.session_state.show_game_details = True
-                        else:
+                    with col_btn_add:
+                        if st.button("➕", key=f"add_btn_{date}"):
                             st.session_state.add_game_date = date
                             st.session_state.show_add_game_form = True
-                        st.rerun()
+                            st.rerun()
+                    
+                    with col_btn_view:
+                        if day_games:
+                            if st.button("👁️", key=f"view_btn_{day_games[0]['id']}"):
+                                st.session_state.view_game_id = day_games[0]['id']
+                                st.session_state.show_game_details = True
+                                st.rerun()
     
     st.markdown("---")
     
